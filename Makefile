@@ -1,8 +1,19 @@
-.PHONY: help up down downd reset logs \
+.PHONY: help up down downd reset logs migrate seed \
 	build test lint fmt check \
 	backend-build backend-run backend-test backend-lint backend-fmt \
 	frontend-install frontend-build frontend-test frontend-lint frontend-format \
 	load-test load-report
+
+# compose と同じ .env を読む。読まないと、ポートを変えている環境で migrate や seed が
+# 別のデータベースに接続してしまう。
+-include .env
+
+# ホスト側から DB につなぐときの接続先。compose が公開するポートに合わせる。
+POSTGRES_PORT ?= 5432
+POSTGRES_USER ?= anontopic
+POSTGRES_PASSWORD ?= anontopic
+POSTGRES_DB ?= anontopic
+LOCAL_DATABASE_URL ?= postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@localhost:$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=disable
 
 # 負荷テスト（Vegeta）の既定値。make load-test LOAD_RATE=200 のように上書きできる。
 LOAD_RATE ?= 50
@@ -16,18 +27,32 @@ help: ## Show available targets
 
 # --- ローカル環境 ---------------------------------------------------------
 
-up: ## Start the local stack and wait until every service is healthy
-	docker compose up -d --wait
+# docker が無い環境で compose のターゲットを叩いたときに、何が足りないのかを示す。
+.PHONY: require-docker
+require-docker:
+	@command -v docker >/dev/null 2>&1 \
+		|| { echo "docker が見つかりません。Docker Desktop 等を入れてから実行してください。"; exit 1; }
 
-down: ## Stop the local stack, keeping the PostgreSQL and Redis volumes
+up: require-docker ## Start the local stack, apply migrations and load the seed data
+	docker compose up -d --wait
+	$(MAKE) migrate
+	$(MAKE) seed
+
+migrate: ## Apply the schema migrations to the local database
+	DATABASE_URL=$(LOCAL_DATABASE_URL) go run ./cmd/migrate up
+
+seed: ## Load the seed data into the local database
+	DATABASE_URL=$(LOCAL_DATABASE_URL) go run ./cmd/seed
+
+down: require-docker ## Stop the local stack, keeping the PostgreSQL and Redis volumes
 	docker compose down
 
-downd: ## Stop the local stack and drop its data volumes
+downd: require-docker ## Stop the local stack and drop its data volumes
 	docker compose down -v
 
 reset: downd up ## Recreate the local stack from empty data volumes
 
-logs: ## Follow the logs of every service
+logs: require-docker ## Follow the logs of every service
 	docker compose logs -f
 
 # --- 全体 -----------------------------------------------------------------
