@@ -40,7 +40,8 @@ cp .env.example .env   # ポートなどを変えたい場合のみ編集する
 make up                # 初回はイメージのビルドで数分かかる
 ```
 
-`make up` は全サービスが healthy になるまで待つ。
+`make up` は全サービスが healthy になるのを待ってから、マイグレーションとシードを流す。
+クローン直後でもトピックが入った状態で開発を始められる。
 
 | サービス | 用途 | ホスト側 |
 | --- | --- | --- |
@@ -60,6 +61,21 @@ curl localhost:8080/readyz    # PostgreSQL と Redis に接続できるか
 ```
 
 `/readyz` はどちらかに接続できないと 503 と失敗した接続先を返す。
+
+### スキーマとデータ
+
+| | migrate | seed |
+| --- | --- | --- |
+| 対象 | スキーマ（テーブル・インデックス） | データ（行） |
+| 実行回数 | 各バージョン 1 回だけ | 何度でも（冪等） |
+| 適用済み管理 | `schema_migrations` テーブル | 追跡しない |
+| 環境差 | 全環境で同じ | 環境ごとに違う |
+
+- マイグレーションは `db/migrations/`。`cmd/migrate` が embed して適用する。
+  `go run ./cmd/migrate down` で 1 つ戻せる。
+- シードは `db/seeds/`。`base/` は全環境、`dev/` は `APP_ENV=production` 以外でのみ入る。
+  `dev/` には通報済みの会話や 90 日を超えた会話が含まれ、通報一覧や削除バッチの確認に使う。
+- `messages` は月次パーティション。初期マイグレーションが当月の前後 10 か月分を作る。
 
 ### 停止
 
@@ -88,9 +104,11 @@ Go サーバーを `make backend-run` で直接起動する場合も、PostgreSQ
 ターゲット名は `<領域>-<動作>` に揃えている。領域を省いたものは両方を実行する。
 
 ```bash
-make up            # ローカル環境を起動
+make up            # 起動 → マイグレーション → シードまで
 make down          # 停止（データは残す）
 make downd         # 停止してデータも破棄
+make migrate       # スキーマだけ最新にする
+make seed          # データだけ入れ直す
 
 make build         # backend-build と frontend-build
 make test          # backend-test と frontend-test
