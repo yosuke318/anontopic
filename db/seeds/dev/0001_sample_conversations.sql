@@ -54,12 +54,7 @@ FROM (VALUES
     ('33333333-3333-3333-3333-333333333333', 'devseed-conv3-participant-a', now() - interval '100 days'),
     ('33333333-3333-3333-3333-333333333333', 'devseed-conv3-participant-b', now() - interval '100 days')
 ) AS seed(conversation_id, session_token, joined_at)
-WHERE NOT EXISTS (
-    SELECT 1
-    FROM conversation_participants p
-    WHERE p.conversation_id = seed.conversation_id::uuid
-      AND p.session_token = seed.session_token
-);
+ON CONFLICT (conversation_id, session_token) DO NOTHING;
 
 INSERT INTO messages (conversation_id, sender_token, body, moderation_flag, created_at)
 SELECT seed.conversation_id::uuid, seed.sender_token, seed.body, seed.moderation_flag, seed.created_at
