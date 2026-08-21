@@ -37,9 +37,10 @@ PostgreSQL / Redis / API / Web の 4 サービスを Docker Compose で起動す
 
 ```bash
 cp .env.example .env   # ポートなどを変えたい場合のみ編集する
-docker compose up -d   # 初回はイメージのビルドで数分かかる
-docker compose ps      # 全サービスが healthy になれば準備完了
+make up                # 初回はイメージのビルドで数分かかる
 ```
+
+`make up` は全サービスが healthy になるまで待つ。
 
 | サービス | 用途 | ホスト側 |
 | --- | --- | --- |
@@ -63,8 +64,9 @@ curl localhost:8080/readyz    # PostgreSQL と Redis に接続できるか
 ### 停止
 
 ```bash
-docker compose down      # コンテナのみ削除（DB / Redis のデータは残る）
-docker compose down -v   # データボリュームごと削除（初期状態に戻る）
+make down    # コンテナのみ削除（DB / Redis のデータは残る）
+make downd   # データボリュームごと削除（初期状態に戻る）
+make reset   # downd してから up（初期状態で作り直す）
 ```
 
 ポートが既に使われている場合は `.env` で `POSTGRES_PORT` / `REDIS_PORT` / `API_PORT` /
@@ -77,19 +79,26 @@ go mod download
 cd web && npm install
 ```
 
-Go サーバーを `make run` で直接起動する場合も、PostgreSQL と Redis は
+Go サーバーを `make backend-run` で直接起動する場合も、PostgreSQL と Redis は
 `docker compose up -d postgres redis` で用意する。接続先の既定値は
 `.env.example` のポートに合わせてあり、`DATABASE_URL` / `REDIS_URL` で上書きできる。
 
 ## よく使うコマンド
 
+ターゲット名は `<領域>-<動作>` に揃えている。領域を省いたものは両方を実行する。
+
 ```bash
-make build       # go build ./...
-make run         # ローカルで API サーバーを起動（http://localhost:8080/healthz）
-make lint        # golangci-lint
-make web-build   # Next.js のビルド
-make web-lint    # ESLint
-make check       # CI と同じ一連のチェック
+make up            # ローカル環境を起動
+make down          # 停止（データは残す）
+make downd         # 停止してデータも破棄
+
+make build         # backend-build と frontend-build
+make test          # backend-test と frontend-test
+make lint          # backend-lint と frontend-lint
+make check         # push 前に通すべき一連のチェック
+
+make backend-run   # API サーバーだけを直接起動
+make frontend-lint # ESLint だけを実行
 ```
 
 `make help` で全ターゲットを確認できる。
@@ -100,7 +109,7 @@ make check       # CI と同じ一連のチェック
 別途インストールする必要はない。
 
 ```bash
-make run                                      # 別ターミナルでサーバーを起動
+make backend-run                              # 別ターミナルでサーバーを起動
 make load-test                                # 既定: 50 req/s を 30 秒
 make load-test LOAD_RATE=200 LOAD_DURATION=1m # レート・時間の上書き
 make load-report                              # 直近の結果をレポート＋レイテンシ分布で表示

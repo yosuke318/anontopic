@@ -43,12 +43,12 @@
 
 - フォーマットは `gofmt` / `goimports`（ローカルパッケージは `github.com/yosuke318/anontopic` にグループ化）。
 - Lint は `golangci-lint run ./...`（設定は `.golangci.yml`）。
-- push 前に `make build && make test && make lint` が通ることを確認する。
+- push 前に `make backend-lint && make backend-test && make backend-build` が通ることを確認する。
 
 ### TypeScript / Next.js
 
 - フォーマットは Prettier（`web/.prettierrc.json`）、Lint は ESLint（`web/eslint.config.mjs`）。
-- push 前に `cd web && npm run lint && npm run typecheck && npm run build` が通ることを確認する。
+- push 前に `make frontend-lint && make frontend-build` と `cd web && npm run typecheck` が通ることを確認する。
 - `next-env.d.ts` と `.next/types/` は `next typegen` が生成するファイルなので Git 管理外。
   `npm install`（postinstall）、`npm run typecheck`、`npm run build` がそれぞれ生成するため、
   通常は意識しなくてよい。クローン直後にエディタが `LayoutProps` 等を解決できない場合は
