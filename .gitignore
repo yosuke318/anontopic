@@ -1,0 +1,30 @@
+# Go
+/bin/
+/dist/
+*.test
+*.out
+coverage.*
+
+# Node / Next.js (web/ has its own .gitignore as well)
+node_modules/
+.next/
+out/
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+*.tfvars
+!example.tfvars
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
