@@ -1,8 +1,12 @@
-.PHONY: help hooks up down downd reset logs migrate seed \
+.PHONY: help tools hooks up down downd reset logs migrate seed \
 	build test lint fmt check \
 	backend-build backend-run backend-test backend-lint backend-fmt \
 	frontend-install frontend-build frontend-test frontend-lint frontend-typecheck frontend-format \
 	load-test load-report
+
+# 開発ツールのバージョン。CI も同じ値を使うため、ここが唯一の定義になる。
+GOLANGCI_LINT_VERSION ?= v2.13.1
+GITLEAKS_VERSION ?= v8.30.1
 
 # compose と同じ .env を読む。読まないと、ポートを変えている環境で migrate や seed が
 # 別のデータベースに接続してしまう。
@@ -24,6 +28,10 @@ LOAD_RESULT ?= test/load/results/latest.bin
 help: ## Show available targets
 	@grep -hE '^[^ 	#]+:.*## ' $(MAKEFILE_LIST) \
 		| awk -F':' '{ target = $$1; sub(/.*## /, "", $$0); printf "  %-20s %s\n", target, $$0 }'
+
+tools: ## Install the developer tools this repository pins (TOOLS=... で絞れる)
+	@GOLANGCI_LINT_VERSION=$(GOLANGCI_LINT_VERSION) GITLEAKS_VERSION=$(GITLEAKS_VERSION) \
+		./scripts/install-tools.sh $(TOOLS)
 
 hooks: ## Point git at the repository's hooks in .githooks
 	git config core.hooksPath .githooks
