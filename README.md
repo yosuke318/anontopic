@@ -91,6 +91,37 @@ make reset   # downd してから up（初期状態で作り直す）
 ポートが既に使われている場合は `.env` で `POSTGRES_PORT` / `REDIS_PORT` / `API_PORT` /
 `WEB_PORT` を変更する。コンテナ間の通信はサービス名で行うため影響しない。
 
+## 開発ツール
+
+golangci-lint と gitleaks を、リポジトリが固定しているバージョンで入れる。
+
+```bash
+make tools                        # 両方
+make tools TOOLS=golangci-lint    # 片方だけ
+```
+
+バージョンは Makefile の `GOLANGCI_LINT_VERSION` / `GITLEAKS_VERSION` が唯一の定義で、
+CI も同じ値を使う。`go install` の出力先（`$(go env GOPATH)/bin`）が PATH に無い場合や、
+別の場所にある同名の実行ファイルが優先される場合は警告が出る。
+
+## git hooks
+
+コミット前の検査を有効にする。クローンした直後は無効なので、最初に 1 度実行する。
+
+```bash
+make hooks
+```
+
+`.githooks/pre-commit` が見るのは、ステージした内容だけで完結する軽い検査に限っている。
+テストとビルドは CI の担当。
+
+| 検査 | 動作 |
+| --- | --- |
+| シークレットの混入（gitleaks） | コミットを止める。gitleaks が無い環境では飛ばす |
+| gofmt / Prettier | コミットを止める |
+| コメント規約（タスク番号・過去の実装との比較） | 知らせるだけで止めない。正当な用法にも当たるため |
+| マイグレーションの番号重複・down の欠落 | コミットを止める |
+
 ## セットアップ（コンテナを使わない場合）
 
 ```bash

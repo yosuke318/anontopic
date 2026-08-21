@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+env:
+  GO_VERSION: "1.26"
+  NODE_VERSION: "22"
+
+jobs:
+  backend-lint:
+    name: バックエンド lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      # バージョンの定義は Makefile 側にある。CI とローカルで食い違わないようにする。
+      - name: golangci-lint を入れる
+        run: make tools TOOLS=golangci-lint
+      - run: go vet ./...
+      - run: make backend-lint
+
+  backend-test:
+    name: バックエンド test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: anontopic
+          POSTGRES_PASSWORD: anontopic
+          POSTGRES_DB: anontopic
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U anontopic -d anontopic"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - run: make backend-build
+      - run: make backend-test
+      # 空のデータベースにスキーマと初期データを流せることを確かめる。
+      # 接続先は Makefile の既定値（localhost:5432）がそのまま使える。
+      - name: マイグレーションとシードを空の DB に適用する
+        run: |
+          make migrate
+          make seed
+      - name: 巻き戻せることを確かめる
+        run: go run ./cmd/migrate down
+
+  frontend-lint:
+    name: フロントエンド lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+
+  frontend-test:
+    name: フロントエンド test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm test --if-present
+      - run: npm run build
