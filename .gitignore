@@ -1,5 +1,6 @@
 # Go
 /bin/
+/test/load/results/
 /dist/
 *.test
 *.out

@@ -51,6 +51,20 @@ make check       # CI と同じ一連のチェック
 
 `make help` で全ターゲットを確認できる。
 
+## 負荷テスト
+
+[Vegeta](https://github.com/tsenart/vegeta) を `go.mod` の tool 依存として管理しているため、
+別途インストールする必要はない。
+
+```bash
+make run                                      # 別ターミナルでサーバーを起動
+make load-test                                # 既定: 50 req/s を 30 秒
+make load-test LOAD_RATE=200 LOAD_DURATION=1m # レート・時間の上書き
+make load-report                              # 直近の結果をレポート＋レイテンシ分布で表示
+```
+
+詳細は [test/load/README.md](./test/load/README.md) を参照。
+
 ## モジュール間の依存ルール
 
 `internal/` 配下の各モジュールは独立している。**他モジュールの DB モデル / リポジトリを直接 import してはならない。**
