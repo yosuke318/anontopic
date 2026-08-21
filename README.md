@@ -31,12 +31,55 @@ Go のモジュラーモノリス（バックエンド）と Next.js（フロン
 | Node.js | 22 以上 |
 | golangci-lint | 2 系 |
 
-## セットアップ
+## ローカル環境（Docker Compose）
+
+PostgreSQL / Redis / API / Web の 4 サービスを Docker Compose で起動する。
+
+```bash
+cp .env.example .env   # ポートなどを変えたい場合のみ編集する
+docker compose up -d   # 初回はイメージのビルドで数分かかる
+docker compose ps      # 全サービスが healthy になれば準備完了
+```
+
+| サービス | 用途 | ホスト側 |
+| --- | --- | --- |
+| `api` | Go サーバー（air によるホットリロード） | http://localhost:8080 |
+| `web` | Next.js dev server | http://localhost:3000 |
+| `postgres` | PostgreSQL 18 | localhost:5432 |
+| `redis` | Redis 8 | localhost:6379 |
+
+`api` / `web` はソースをバインドマウントしているため、ホスト側でファイルを編集すると
+そのまま反映される。
+
+### 疎通確認
+
+```bash
+curl localhost:8080/healthz   # プロセスが生きているか
+curl localhost:8080/readyz    # PostgreSQL と Redis に接続できるか
+```
+
+`/readyz` はどちらかに接続できないと 503 と失敗した接続先を返す。
+
+### 停止
+
+```bash
+docker compose down      # コンテナのみ削除（DB / Redis のデータは残る）
+docker compose down -v   # データボリュームごと削除（初期状態に戻る）
+```
+
+ポートが既に使われている場合は `.env` で `POSTGRES_PORT` / `REDIS_PORT` / `API_PORT` /
+`WEB_PORT` を変更する。コンテナ間の通信はサービス名で行うため影響しない。
+
+## セットアップ（コンテナを使わない場合）
 
 ```bash
 go mod download
 cd web && npm install
 ```
+
+Go サーバーを `make run` で直接起動する場合も、PostgreSQL と Redis は
+`docker compose up -d postgres redis` で用意する。接続先の既定値は
+`.env.example` のポートに合わせてあり、`DATABASE_URL` / `REDIS_URL` で上書きできる。
 
 ## よく使うコマンド
 
