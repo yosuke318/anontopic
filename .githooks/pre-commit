@@ -42,7 +42,7 @@ if [ -n "$go_files" ]; then
 	fi
 fi
 
-web_files=$(staged 'web/*.ts' 'web/*.tsx' 'web/*.css' 'web/*.json' 'web/*.mjs')
+web_files=$(staged 'web/**/*.ts' 'web/**/*.tsx' 'web/**/*.css' 'web/**/*.json' 'web/**/*.mjs')
 if [ -n "$web_files" ]; then
 	if [ -x web/node_modules/.bin/prettier ]; then
 		if ! echo "$web_files" | sed 's|^web/||' |
