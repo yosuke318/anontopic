@@ -1,7 +1,7 @@
 .PHONY: help up down downd reset logs migrate seed \
 	build test lint fmt check \
 	backend-build backend-run backend-test backend-lint backend-fmt \
-	frontend-install frontend-build frontend-test frontend-lint frontend-format \
+	frontend-install frontend-build frontend-test frontend-lint frontend-typecheck frontend-format \
 	load-test load-report
 
 # compose と同じ .env を読む。読まないと、ポートを変えている環境で migrate や seed が
@@ -61,7 +61,7 @@ build: backend-build frontend-build ## Build the backend and the frontend
 
 test: backend-test frontend-test ## Run the backend and frontend tests
 
-lint: backend-lint frontend-lint ## Lint the backend and the frontend
+lint: backend-lint frontend-lint frontend-typecheck ## Lint and type-check the backend and the frontend
 
 fmt: backend-fmt frontend-format ## Format the backend and the frontend
 
@@ -97,6 +97,9 @@ frontend-test: ## Run the web tests, if the package defines any
 
 frontend-lint: ## Lint the Next.js app
 	cd web && npm run lint
+
+frontend-typecheck: ## Type-check the Next.js app
+	cd web && npm run typecheck
 
 frontend-format: ## Format the Next.js app with Prettier
 	cd web && npm run format
