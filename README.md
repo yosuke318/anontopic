@@ -55,3 +55,8 @@ make check       # CI と同じ一連のチェック
 
 `internal/` 配下の各モジュールは独立している。**他モジュールの DB モデル / リポジトリを直接 import してはならない。**
 詳細は [CONTRIBUTING.md](./CONTRIBUTING.md) を参照。
+
+## コメントの書き方
+
+コードコメントでは、過去の実装との比較（従来 / 以前 / 旧〜 / 置換 / 〜と同じ など）を書かず、
+定義のない造語も使わない。詳細は [CONTRIBUTING.md](./CONTRIBUTING.md#コメントの書き方) を参照。
