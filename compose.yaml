@@ -1,0 +1,97 @@
+name: anontopic
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-anontopic}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-anontopic}
+      POSTGRES_DB: ${POSTGRES_DB:-anontopic}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      # postgres:18 keeps PGDATA under /var/lib/postgresql/18/docker and
+      # declares /var/lib/postgresql as its volume.
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-anontopic} -d ${POSTGRES_DB:-anontopic}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  redis:
+    image: redis:8-alpine
+    # Matching queues and presence live in Redis, so keep an on-disk copy to
+    # survive a container restart. `task downd` drops the volume.
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    environment:
+      APP_ADDR: ":8080"
+      DATABASE_URL: postgres://${POSTGRES_USER:-anontopic}:${POSTGRES_PASSWORD:-anontopic}@postgres:5432/${POSTGRES_DB:-anontopic}?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "${API_PORT:-8080}:8080"
+    volumes:
+      - .:/app
+      # Caches stay in volumes so a rebuild does not re-download every module
+      # and the host tree keeps only source files.
+      - go-mod-cache:/go/pkg/mod
+      - go-build-cache:/root/.cache/go-build
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 30s
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/web.Dockerfile
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8080}
+      NEXT_PUBLIC_WS_BASE_URL: ${NEXT_PUBLIC_WS_BASE_URL:-ws://localhost:8080}
+      WATCHPACK_POLLING: "true"
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    volumes:
+      - ./web:/app
+      # node_modules and .next belong to the container: the host tree may hold
+      # binaries built for a different platform.
+      - web-node-modules:/app/node_modules
+      - web-next-cache:/app/.next
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+  redis-data:
+  go-mod-cache:
+  go-build-cache:
+  web-node-modules:
+  web-next-cache:

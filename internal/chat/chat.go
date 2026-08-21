@@ -33,7 +33,8 @@ func (h *Handler) Register(mux *http.ServeMux) {
 
 // handleRoomSocket upgrades the request to a WebSocket connection.
 //
-// TODO(YOSUKE-115): implement room join, fan-out and disconnect handling.
+// Room join, message fan-out and disconnect handling are not implemented yet,
+// so the endpoint answers 501.
 func (h *Handler) handleRoomSocket(w http.ResponseWriter, _ *http.Request) {
 	http.Error(w, "not implemented", http.StatusNotImplemented)
 }

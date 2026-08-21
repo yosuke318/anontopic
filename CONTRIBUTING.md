@@ -43,12 +43,12 @@
 
 - フォーマットは `gofmt` / `goimports`（ローカルパッケージは `github.com/yosuke318/anontopic` にグループ化）。
 - Lint は `golangci-lint run ./...`（設定は `.golangci.yml`）。
-- push 前に `make build && make test && make lint` が通ることを確認する。
+- push 前に `make backend-lint && make backend-test && make backend-build` が通ることを確認する。
 
 ### TypeScript / Next.js
 
 - フォーマットは Prettier（`web/.prettierrc.json`）、Lint は ESLint（`web/eslint.config.mjs`）。
-- push 前に `cd web && npm run lint && npm run typecheck && npm run build` が通ることを確認する。
+- push 前に `make frontend-lint && make frontend-build` と `cd web && npm run typecheck` が通ることを確認する。
 - `next-env.d.ts` と `.next/types/` は `next typegen` が生成するファイルなので Git 管理外。
   `npm install`（postinstall）、`npm run typecheck`、`npm run build` がそれぞれ生成するため、
   通常は意識しなくてよい。クローン直後にエディタが `LayoutProps` 等を解決できない場合は
@@ -90,7 +90,28 @@ Go / TypeScript を問わず、すべてのコードコメントに適用する�
 // 会話が続きにくいため 2 人ルームは最終手段とし、まず 3 人揃うのを待つ。
 ```
 
-#### 2. 造語を作らない
+#### 2. タスク番号・チケット番号を書かない
+
+`YOSUKE-123` / `#123` / `TODO(YOSUKE-115)` / 「issue 42 参照」のような参照はコメントに残さない。
+
+issue は閉じるので、後から番号を見ても今のコードがなぜこうなっているかは分からない。
+リポジトリの外への参照になるため、clone しただけでは解決できず、トラッカーを移行すれば
+ただの文字列になる。コードと issue の対応は commit と PR に残っている。
+
+未完成の実装は、コメントで予告するのではなく Linear の issue で追う。コードには
+「今どう振る舞うか」だけを書く。
+
+```go
+// NG: 番号を見に行かないと何も分からない
+// TODO(YOSUKE-115): implement room join, fan-out and disconnect handling.
+
+// OK: 今の振る舞いを書く
+// ルームへの参加・配送・切断はまだ実装しておらず、501 を返す。
+```
+
+リポジトリ内にある `docs/adr/` の ADR は指してよい。clone すれば読めて、閉じないため。
+
+#### 3. 造語を作らない
 
 コメントに登場する用語は、次のいずれかに限る。
 
@@ -112,7 +133,7 @@ AI に生成させたコメントには、このリポジトリのどこにも�
 新しい概念が本当に必要なら、まず基本設計書か CONTRIBUTING.md に用語として定義し、
 可能ならコード上の型名・関数名にする。コメントだけに存在する用語は作らない。
 
-#### 3. コメントを書かない選択も正しい
+#### 4. コメントを書かない選択も正しい
 
 識別子を適切に命名すれば不要になるコメントは、コメントではなく命名で解決する。
 残すのは、コードを読んでも分からない「なぜ」と、外部仕様・制約への参照。
