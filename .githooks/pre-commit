@@ -1,0 +1,105 @@
+#!/bin/sh
+# ステージした内容だけを検査する。テストやビルドのような重い検査は CI が受け持つ。
+# 有効化: make hooks
+set -u
+
+status=0
+
+staged() {
+	git diff --cached --name-only --diff-filter=ACM -- "$@"
+}
+
+say_fail() {
+	printf '\033[31m%s\033[0m\n' "$1"
+}
+
+say_warn() {
+	printf '\033[33m%s\033[0m\n' "$1"
+}
+
+# --- 1. シークレットの混入 ------------------------------------------------
+# 唯一やり直しの利かない失敗なので最初に見る。公開リポジトリのため、push した
+# 時点で鍵は使えなくなるものとして扱う。
+if command -v gitleaks >/dev/null 2>&1; then
+	if gitleaks git --help >/dev/null 2>&1; then
+		gitleaks git --staged --redact --no-banner . || status=1
+	else
+		gitleaks protect --staged --redact --no-banner || status=1
+	fi
+else
+	say_warn "gitleaks が無いためシークレット検査を飛ばした（brew install gitleaks）"
+fi
+
+# --- 2. フォーマット ------------------------------------------------------
+go_files=$(staged '*.go')
+if [ -n "$go_files" ]; then
+	unformatted=$(gofmt -l $go_files 2>/dev/null)
+	if [ -n "$unformatted" ]; then
+		say_fail "gofmt が必要:"
+		echo "$unformatted" | sed 's/^/  /'
+		echo "  make backend-fmt"
+		status=1
+	fi
+fi
+
+web_files=$(staged 'web/*.ts' 'web/*.tsx' 'web/*.css' 'web/*.json' 'web/*.mjs')
+if [ -n "$web_files" ]; then
+	if [ -x web/node_modules/.bin/prettier ]; then
+		if ! echo "$web_files" | sed 's|^web/||' |
+			(cd web && xargs ./node_modules/.bin/prettier --check --log-level warn); then
+			say_fail "  make frontend-format"
+			status=1
+		fi
+	else
+		say_warn "web/node_modules が無いため Prettier の検査を飛ばした（make frontend-install）"
+	fi
+fi
+
+# --- 3. コメント規約 ------------------------------------------------------
+# CONTRIBUTING.md「コメントの書き方」。追加行のコメントだけを見る。
+# 正当な用法にも当たるため、コミットは止めずに知らせるだけにする。
+added_comments=$(git diff --cached --unified=0 --diff-filter=ACM |
+	grep '^+' | grep -v '^+++' |
+	grep -E '(//|^\+[[:space:]]*(--|#))' || true)
+
+if [ -n "$added_comments" ]; then
+	ticket=$(echo "$added_comments" | grep -nE 'YOSUKE-[0-9]+|TODO\(|FIXME\(' || true)
+	if [ -n "$ticket" ]; then
+		say_warn "コメントにタスク番号が入っている可能性:"
+		echo "$ticket" | sed 's/^/  /'
+	fi
+
+	history=$(echo "$added_comments" |
+		grep -E '従来|以前|これまで|今まで|前回|変更前|修正後|置き換え|と同様|previously|formerly|used to|no longer' || true)
+	if [ -n "$history" ]; then
+		say_warn "コメントが過去の実装と比較している可能性:"
+		echo "$history" | sed 's/^/  /'
+	fi
+fi
+
+# --- 4. マイグレーションの連番 --------------------------------------------
+# 別々のブランチで同じ番号を採ると golang-migrate が壊れる。
+if [ -d db/migrations ]; then
+	versions=$(ls db/migrations/*.up.sql 2>/dev/null | sed 's|.*/\([0-9][0-9]*\)_.*|\1|')
+	duplicated=$(echo "$versions" | sort | uniq -d)
+	if [ -n "$duplicated" ]; then
+		say_fail "マイグレーションの番号が重複している:"
+		echo "$duplicated" | sed 's/^/  /'
+		status=1
+	fi
+
+	for up in db/migrations/*.up.sql; do
+		[ -e "$up" ] || continue
+		down=$(echo "$up" | sed 's/\.up\.sql$/.down.sql/')
+		if [ ! -f "$down" ]; then
+			say_fail "down のマイグレーションが無い: $down"
+			status=1
+		fi
+	done
+fi
+
+if [ "$status" -ne 0 ]; then
+	echo "直してから commit し直すこと。どうしても通したい場合は git commit --no-verify。"
+fi
+
+exit "$status"

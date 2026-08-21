@@ -1,4 +1,4 @@
-.PHONY: help up down downd reset logs migrate seed \
+.PHONY: help hooks up down downd reset logs migrate seed \
 	build test lint fmt check \
 	backend-build backend-run backend-test backend-lint backend-fmt \
 	frontend-install frontend-build frontend-test frontend-lint frontend-typecheck frontend-format \
@@ -24,6 +24,10 @@ LOAD_RESULT ?= test/load/results/latest.bin
 help: ## Show available targets
 	@grep -hE '^[^ 	#]+:.*## ' $(MAKEFILE_LIST) \
 		| awk -F':' '{ target = $$1; sub(/.*## /, "", $$0); printf "  %-20s %s\n", target, $$0 }'
+
+hooks: ## Point git at the repository's hooks in .githooks
+	git config core.hooksPath .githooks
+	@echo "core.hooksPath を .githooks に設定した。"
 
 # --- ローカル環境 ---------------------------------------------------------
 
