@@ -49,6 +49,10 @@
 
 - フォーマットは Prettier（`web/.prettierrc.json`）、Lint は ESLint（`web/eslint.config.mjs`）。
 - push 前に `cd web && npm run lint && npm run typecheck && npm run build` が通ることを確認する。
+- `next-env.d.ts` と `.next/types/` は `next typegen` が生成するファイルなので Git 管理外。
+  `npm install`（postinstall）、`npm run typecheck`、`npm run build` がそれぞれ生成するため、
+  通常は意識しなくてよい。クローン直後にエディタが `LayoutProps` 等を解決できない場合は
+  `cd web && npx next typegen` を実行する。
 
 まとめて確認する場合は `make check` を使う。
 
