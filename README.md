@@ -75,6 +75,10 @@ curl -i -X DELETE localhost:8080/api/session -b cookie.txt # 明示的な離脱�
 
 `/ws/rooms/{roomID}` は有効なセッションが無いと 401 を返す。
 
+エンドポイントの仕様は [docs/openapi.yaml](docs/openapi.yaml) にある。手元で読むには
+`npx @redocly/cli preview-docs docs/openapi.yaml`、検査するには
+`npx @redocly/cli lint docs/openapi.yaml` を使う。
+
 API サーバーの設定は環境変数で行う。
 
 | 変数 | 既定値 | 用途 |
