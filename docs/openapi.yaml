@@ -132,8 +132,9 @@ paths:
         まだ行わない。ハンドシェイク（101 応答とそれ以降のメッセージ形式）はルームの
         参加・配送を実装するときに合わせてこの仕様へ追記する。
 
-        Origin ヘッダが APP_ALLOWED_ORIGINS にも自ホストにも一致しない場合は
-        アップグレードの前段で接続を拒否する。
+        Origin ヘッダが APP_ALLOWED_ORIGINS にも自ホストにも一致しない場合は、
+        セッションを検証する前に 403 で拒否する。検証はセッションの寿命を延ばすため、
+        他サイトのページが他人のセッションを延命できないようにしている。
       security:
         - sessionCookie: []
       parameters:
@@ -152,6 +153,14 @@ paths:
                 type: string
                 examples:
                   - unauthorized
+        "403":
+          description: 許可されていない Origin からの接続
+          content:
+            text/plain:
+              schema:
+                type: string
+                examples:
+                  - forbidden
         "501":
           description: 認証は通ったが、ルームの処理が未実装
           content:

@@ -158,7 +158,7 @@ func (s *Service) Verify(ctx context.Context, token string) (Session, error) {
 	}
 
 	ttl := min(s.idleTTL, deadline.Sub(now))
-	if err := s.store.Refresh(ctx, token, ttl); err != nil {
+	if err := s.store.Refresh(ctx, token, rec.IPHash, ttl); err != nil {
 		if errors.Is(err, ErrNotStored) {
 			return Session{}, ErrInvalidSession
 		}

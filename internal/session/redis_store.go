@@ -31,7 +31,6 @@ func NewRedisStore(client redis.UniversalClient) *RedisStore {
 // Create writes the record and adds the token to the index of its address.
 func (s *RedisStore) Create(ctx context.Context, token string, rec Record, ttl time.Duration) error {
 	sessionKey := sessionKeyPrefix + token
-	indexKey := ipIndexKeyPrefix + rec.IPHash
 
 	pipe := s.client.TxPipeline()
 	pipe.HSet(ctx, sessionKey,
@@ -39,15 +38,24 @@ func (s *RedisStore) Create(ctx context.Context, token string, rec Record, ttl t
 		fieldIssuedAt, strconv.FormatInt(rec.IssuedAt.UnixNano(), 10),
 	)
 	pipe.Expire(ctx, sessionKey, ttl)
-	pipe.SAdd(ctx, indexKey, token)
-	// The index only has to outlive the sessions it points at. Members whose
-	// session already expired are skipped on delete.
-	pipe.Expire(ctx, indexKey, ttl)
+	touchIndex(ctx, pipe, rec.IPHash, token, ttl)
 
 	if _, err := pipe.Exec(ctx); err != nil {
 		return fmt.Errorf("create session: %w", err)
 	}
 	return nil
+}
+
+// touchIndex keeps the index of an address alive for at least as long as the
+// session being written. SAdd puts the token back when the index expired
+// first, ExpireNX gives a new index its lifetime, and ExpireGT extends an
+// existing one without cutting short the lifetime another session needs.
+func touchIndex(ctx context.Context, pipe redis.Pipeliner, ipHash, token string, ttl time.Duration) {
+	indexKey := ipIndexKeyPrefix + ipHash
+
+	pipe.SAdd(ctx, indexKey, token)
+	pipe.ExpireNX(ctx, indexKey, ttl)
+	pipe.ExpireGT(ctx, indexKey, ttl)
 }
 
 // Get reads the record stored under token.
@@ -71,14 +79,23 @@ func (s *RedisStore) Get(ctx context.Context, token string) (Record, error) {
 	}, nil
 }
 
-// Refresh moves the expiry of an existing session.
-func (s *RedisStore) Refresh(ctx context.Context, token string, ttl time.Duration) error {
+// Refresh moves the expiry of an existing session and of the index that a ban
+// reads to find it.
+func (s *RedisStore) Refresh(ctx context.Context, token, ipHash string, ttl time.Duration) error {
 	ok, err := s.client.Expire(ctx, sessionKeyPrefix+token, ttl).Result()
 	if err != nil {
 		return fmt.Errorf("refresh session: %w", err)
 	}
 	if !ok {
 		return ErrNotStored
+	}
+
+	// The index is only touched for a session that is still alive, so an
+	// expired token is not put back into it.
+	pipe := s.client.TxPipeline()
+	touchIndex(ctx, pipe, ipHash, token, ttl)
+	if _, err := pipe.Exec(ctx); err != nil {
+		return fmt.Errorf("refresh session index: %w", err)
 	}
 	return nil
 }
