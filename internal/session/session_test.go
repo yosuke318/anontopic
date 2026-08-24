@@ -56,7 +56,7 @@ func (s *memoryStore) Get(_ context.Context, token string) (Record, error) {
 	return entry.rec, nil
 }
 
-func (s *memoryStore) Refresh(_ context.Context, token string, ttl time.Duration) error {
+func (s *memoryStore) Refresh(_ context.Context, token, _ string, ttl time.Duration) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

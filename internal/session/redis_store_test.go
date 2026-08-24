@@ -106,7 +106,7 @@ func TestRedisStoreReportsUnknownTokens(t *testing.T) {
 	if _, err := store.Get(ctx, unknown); !errors.Is(err, ErrNotStored) {
 		t.Fatalf("Get error = %v, want ErrNotStored", err)
 	}
-	if err := store.Refresh(ctx, unknown, time.Minute); !errors.Is(err, ErrNotStored) {
+	if err := store.Refresh(ctx, unknown, "unknown-ip-hash", time.Minute); !errors.Is(err, ErrNotStored) {
 		t.Fatalf("Refresh error = %v, want ErrNotStored", err)
 	}
 	if err := store.Delete(ctx, unknown); err != nil {
@@ -118,9 +118,10 @@ func TestRedisStoreRefreshMovesTheExpiry(t *testing.T) {
 	store := NewRedisStore(redisTestClient(t))
 	ctx := context.Background()
 
-	token := storeTestSession(t, store, testIPHash(t), time.Second)
+	ipHash := testIPHash(t)
+	token := storeTestSession(t, store, ipHash, time.Second)
 
-	if err := store.Refresh(ctx, token, time.Hour); err != nil {
+	if err := store.Refresh(ctx, token, ipHash, time.Hour); err != nil {
 		t.Fatalf("Refresh: %v", err)
 	}
 
@@ -130,6 +131,67 @@ func TestRedisStoreRefreshMovesTheExpiry(t *testing.T) {
 	}
 	if ttl <= time.Second {
 		t.Fatalf("TTL = %v, want the refreshed hour", ttl)
+	}
+}
+
+func TestRedisStoreRefreshKeepsTheIndexAlive(t *testing.T) {
+	store := NewRedisStore(redisTestClient(t))
+	ctx := context.Background()
+
+	ipHash := testIPHash(t)
+	indexKey := ipIndexKeyPrefix + ipHash
+	t.Cleanup(func() { _ = store.client.Del(ctx, indexKey).Err() })
+
+	token := storeTestSession(t, store, ipHash, time.Second)
+
+	if err := store.Refresh(ctx, token, ipHash, time.Hour); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	// A ban reads the index, so it has to outlive the session it points at.
+	ttl, err := store.client.TTL(ctx, indexKey).Result()
+	if err != nil {
+		t.Fatalf("TTL of the index: %v", err)
+	}
+	if ttl <= time.Second {
+		t.Fatalf("index TTL = %v, want it extended with the session", ttl)
+	}
+
+	deleted, err := store.DeleteByIPHash(ctx, ipHash)
+	if err != nil {
+		t.Fatalf("DeleteByIPHash: %v", err)
+	}
+	if deleted != 1 {
+		t.Fatalf("a ban removed %d sessions, want 1", deleted)
+	}
+}
+
+func TestRedisStoreRefreshDoesNotShortenTheIndex(t *testing.T) {
+	store := NewRedisStore(redisTestClient(t))
+	ctx := context.Background()
+
+	ipHash := testIPHash(t)
+	indexKey := ipIndexKeyPrefix + ipHash
+	t.Cleanup(func() { _ = store.client.Del(ctx, indexKey).Err() })
+
+	longLived := storeTestSession(t, store, ipHash, time.Hour)
+	nearDeadline := storeTestSession(t, store, ipHash, time.Hour)
+
+	// A session close to its absolute deadline refreshes with a short ttl and
+	// must not cut the index short for the session sharing the address.
+	if err := store.Refresh(ctx, nearDeadline, ipHash, time.Minute); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	ttl, err := store.client.TTL(ctx, indexKey).Result()
+	if err != nil {
+		t.Fatalf("TTL of the index: %v", err)
+	}
+	if ttl <= time.Minute {
+		t.Fatalf("index TTL = %v, want the hour the other session needs", ttl)
+	}
+	if _, err := store.Get(ctx, longLived); err != nil {
+		t.Fatalf("the long lived session: %v", err)
 	}
 }
 

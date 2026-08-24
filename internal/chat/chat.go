@@ -21,20 +21,26 @@ type SessionAuthenticator interface {
 
 // Handler exposes the chat module's HTTP/WebSocket surface.
 type Handler struct {
-	upgrader websocket.Upgrader
-	sessions SessionAuthenticator
+	upgrader    websocket.Upgrader
+	sessions    SessionAuthenticator
+	checkOrigin func(*http.Request) bool
 }
 
 // NewHandler builds a chat handler that accepts WebSocket handshakes from
 // allowedOrigins, plus those whose Origin matches the host they were sent to.
 func NewHandler(sessions SessionAuthenticator, allowedOrigins []string) *Handler {
+	// The handler and the upgrader share one function so that both stages of
+	// the handshake accept the same set of sites.
+	checkOrigin := originChecker(allowedOrigins)
+
 	return &Handler{
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
-			CheckOrigin:     originChecker(allowedOrigins),
+			CheckOrigin:     checkOrigin,
 		},
-		sessions: sessions,
+		sessions:    sessions,
+		checkOrigin: checkOrigin,
 	}
 }
 
@@ -48,6 +54,14 @@ func (h *Handler) Register(mux *http.ServeMux) {
 // Room join, message fan-out and disconnect handling are not implemented yet,
 // so an authenticated handshake answers 501.
 func (h *Handler) handleRoomSocket(w http.ResponseWriter, r *http.Request) {
+	// The Origin is checked before the session, because verifying a session
+	// extends its lifetime and a page on another site must not be able to keep
+	// someone else's session alive.
+	if !h.checkOrigin(r) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
 	if _, err := h.sessions.Authenticate(r); err != nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return

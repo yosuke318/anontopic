@@ -25,9 +25,10 @@ type Store interface {
 	Create(ctx context.Context, token string, rec Record, ttl time.Duration) error
 	// Get returns the record stored under token, or ErrNotStored.
 	Get(ctx context.Context, token string) (Record, error)
-	// Refresh sets the remaining lifetime of an existing token to ttl and
-	// returns ErrNotStored if the token is already gone.
-	Refresh(ctx context.Context, token string, ttl time.Duration) error
+	// Refresh sets the remaining lifetime of an existing token to ttl, keeps
+	// the index of ipHash alive for at least as long, and returns ErrNotStored
+	// if the token is already gone.
+	Refresh(ctx context.Context, token, ipHash string, ttl time.Duration) error
 	// Delete removes token. Deleting an absent token is not an error.
 	Delete(ctx context.Context, token string) error
 	// DeleteByIPHash removes every session issued to ipHash and returns how

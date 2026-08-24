@@ -7,12 +7,16 @@ import (
 	"testing"
 )
 
-// stubAuthenticator accepts one token and rejects everything else.
+// stubAuthenticator accepts one token and rejects everything else. It counts
+// its calls so that a test can tell whether the session was touched at all.
 type stubAuthenticator struct {
 	token string
+	calls int
 }
 
-func (a stubAuthenticator) Authenticate(r *http.Request) (string, error) {
+func (a *stubAuthenticator) Authenticate(r *http.Request) (string, error) {
+	a.calls++
+
 	c, err := r.Cookie("anontopic_session")
 	if err != nil || c.Value != a.token {
 		return "", errors.New("invalid session")
@@ -29,7 +33,7 @@ func roomRequest(cookie *http.Cookie) *http.Request {
 }
 
 func TestRoomSocketRejectsRequestsWithoutASession(t *testing.T) {
-	h := NewHandler(stubAuthenticator{token: "valid-token"}, nil)
+	h := NewHandler(&stubAuthenticator{token: "valid-token"}, nil)
 
 	for name, cookie := range map[string]*http.Cookie{
 		"no cookie":     nil,
@@ -52,10 +56,51 @@ func TestRoomSocketRejectsRequestsWithoutASession(t *testing.T) {
 }
 
 func TestRoomSocketAcceptsASession(t *testing.T) {
-	h := NewHandler(stubAuthenticator{token: "valid-token"}, nil)
+	h := NewHandler(&stubAuthenticator{token: "valid-token"}, nil)
 
 	rec := httptest.NewRecorder()
 	h.handleRoomSocket(rec, roomRequest(&http.Cookie{Name: "anontopic_session", Value: "valid-token"}))
+
+	res := rec.Result()
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusNotImplemented {
+		t.Fatalf("status = %d, want %d", res.StatusCode, http.StatusNotImplemented)
+	}
+}
+
+func TestRoomSocketRejectsAnotherSiteBeforeTouchingTheSession(t *testing.T) {
+	sessions := &stubAuthenticator{token: "valid-token"}
+	h := NewHandler(sessions, []string{"https://anontopic.example"})
+
+	r := roomRequest(&http.Cookie{Name: "anontopic_session", Value: "valid-token"})
+	r.Host = "api.anontopic.example"
+	r.Header.Set("Origin", "https://attacker.example")
+
+	rec := httptest.NewRecorder()
+	h.handleRoomSocket(rec, r)
+
+	res := rec.Result()
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", res.StatusCode, http.StatusForbidden)
+	}
+	// Verifying a session extends it, so a rejected origin must not reach it.
+	if sessions.calls != 0 {
+		t.Fatalf("the session was authenticated %d times for a request from another site", sessions.calls)
+	}
+}
+
+func TestRoomSocketAcceptsAConfiguredOrigin(t *testing.T) {
+	h := NewHandler(&stubAuthenticator{token: "valid-token"}, []string{"https://anontopic.example"})
+
+	r := roomRequest(&http.Cookie{Name: "anontopic_session", Value: "valid-token"})
+	r.Host = "api.anontopic.example"
+	r.Header.Set("Origin", "https://anontopic.example")
+
+	rec := httptest.NewRecorder()
+	h.handleRoomSocket(rec, r)
 
 	res := rec.Result()
 	defer res.Body.Close()
