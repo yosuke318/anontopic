@@ -62,6 +62,33 @@ curl localhost:8080/readyz    # PostgreSQL と Redis に接続できるか
 
 `/readyz` はどちらかに接続できないと 503 と失敗した接続先を返す。
 
+### セッション
+
+利用者は会員登録せず、匿名のセッショントークンで識別する。トークンは HttpOnly Cookie
+（`anontopic_session`）で配り、実体は Redis に置く。方式の理由は
+[ADR-0005](docs/adr/0005-anonymous-session-tokens-in-redis.md) にある。
+
+```bash
+curl -i -X POST localhost:8080/api/session -c cookie.txt   # 発行（既存が有効なら延長）
+curl -i -X DELETE localhost:8080/api/session -b cookie.txt # 明示的な離脱で失効
+```
+
+`/ws/rooms/{roomID}` は有効なセッションが無いと 401 を返す。
+
+エンドポイントの仕様は [docs/openapi.yaml](docs/openapi.yaml) にある。手元で読むには
+`npx @redocly/cli preview-docs docs/openapi.yaml`、検査するには
+`npx @redocly/cli lint docs/openapi.yaml` を使う。
+
+API サーバーの設定は環境変数で行う。
+
+| 変数 | 既定値 | 用途 |
+| --- | --- | --- |
+| `APP_ALLOWED_ORIGINS` | `http://localhost:3000` | Cookie 付きリクエストと WebSocket 接続を許可するオリジン（カンマ区切り） |
+| `APP_TRUST_FORWARDED_FOR` | `false` | `X-Forwarded-For` の末尾を接続元とみなす。ロードバランサ経由でのみ有効にする |
+| `SESSION_COOKIE_SECURE` | `true` | Cookie に `Secure` を付ける。http のローカルでは `false` |
+| `SESSION_COOKIE_SAMESITE` | `lax` | `lax` / `strict` / `none`。`none` は `SESSION_COOKIE_SECURE=true` が必要 |
+| `SESSION_IP_HASH_SECRET` | プロセス起動ごとの乱数 | IP ハッシュの鍵。未設定だと再起動でハッシュが変わり、ハッシュに紐づく BAN が外れる |
+
 ### スキーマとデータ
 
 | | migrate | seed |

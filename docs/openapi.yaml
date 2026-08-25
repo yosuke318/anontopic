@@ -1,0 +1,233 @@
+openapi: 3.1.0
+
+info:
+  title: anontopic API
+  version: 0.1.0
+  description: |
+    匿名トピックチャットサービスの HTTP API。
+
+    利用者は会員登録を持たず、匿名のセッショントークンで識別する。トークンは
+    `POST /api/session` が HttpOnly Cookie として発行し、以降のリクエストは
+    ブラウザが自動で送る。方式の背景は docs/adr/0005-anonymous-session-tokens-in-redis.md にある。
+
+servers:
+  - url: http://localhost:8080
+    description: ローカル（make up で起動する api サービス）
+
+tags:
+  - name: health
+    description: プロセスと依存サービスの状態
+  - name: session
+    description: 匿名セッションの発行と失効
+  - name: chat
+    description: ルーム内のリアルタイム通信
+
+paths:
+  /healthz:
+    get:
+      tags: [health]
+      operationId: getHealth
+      summary: プロセスが生きているかを返す
+      security: []
+      description: |
+        PostgreSQL と Redis には触れない。コンテナのヘルスチェックとロードバランサが、
+        プロセスを再起動すべきかの判断に使う。
+      responses:
+        "200":
+          description: プロセスは動作している
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+
+  /readyz:
+    get:
+      tags: [health]
+      operationId: getReadiness
+      summary: 依存するデータストアに接続できるかを返す
+      security: []
+      responses:
+        "200":
+          description: PostgreSQL と Redis の両方に接続できる
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Readiness"
+        "503":
+          description: どちらかに接続できない。失敗した接続先にエラー内容が入る
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Readiness"
+
+  /api/session:
+    post:
+      tags: [session]
+      operationId: issueSession
+      summary: セッションを発行する、または有効なセッションを延長する
+      description: |
+        有効なセッション Cookie を持たないリクエストには新しいトークンを発行する。
+        すでに有効なセッションを持つ場合はトークンを作り直さず、無操作の期限だけを延長する。
+
+        トークンはレスポンスボディには含めず、Set-Cookie でのみ返す。
+      security:
+        - {}
+        - sessionCookie: []
+      responses:
+        "201":
+          description: 新しいセッションを発行した
+          headers:
+            Set-Cookie:
+              description: セッショントークン
+              schema:
+                type: string
+                examples:
+                  - anontopic_session=SJKsX5FJzjvav6ZnhCUBzUa73VYgZwtxB8n3viIJdIg; Path=/; Max-Age=86400; HttpOnly; Secure; SameSite=Lax
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "200":
+          description: 受け取ったセッションが有効だったため、期限を延長した
+          headers:
+            Set-Cookie:
+              description: 同じトークンで有効期限を更新する
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    delete:
+      tags: [session]
+      operationId: revokeSession
+      summary: セッションを失効させる
+      description: |
+        明示的な離脱。Redis からセッションを削除し、Cookie を破棄させる。
+        有効なセッションを持たないリクエストも同じ結果になるため 204 を返す。
+      security:
+        - {}
+        - sessionCookie: []
+      responses:
+        "204":
+          description: 失効した、または失効させるものが無かった
+          headers:
+            Set-Cookie:
+              description: Max-Age=0 でクライアントから Cookie を消す
+              schema:
+                type: string
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /ws/rooms/{roomID}:
+    get:
+      tags: [chat]
+      operationId: connectRoomSocket
+      summary: ルームの WebSocket 接続を確立する
+      description: |
+        現時点ではセッション Cookie を検証するだけで、WebSocket へのアップグレードは
+        まだ行わない。ハンドシェイク（101 応答とそれ以降のメッセージ形式）はルームの
+        参加・配送を実装するときに合わせてこの仕様へ追記する。
+
+        Origin ヘッダが APP_ALLOWED_ORIGINS にも自ホストにも一致しない場合は、
+        セッションを検証する前に 403 で拒否する。検証はセッションの寿命を延ばすため、
+        他サイトのページが他人のセッションを延命できないようにしている。
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: roomID
+          in: path
+          required: true
+          description: 接続先のルーム
+          schema:
+            type: string
+      responses:
+        "401":
+          description: 有効なセッションが無い
+          content:
+            text/plain:
+              schema:
+                type: string
+                examples:
+                  - unauthorized
+        "403":
+          description: 許可されていない Origin からの接続
+          content:
+            text/plain:
+              schema:
+                type: string
+                examples:
+                  - forbidden
+        "501":
+          description: 認証は通ったが、ルームの処理が未実装
+          content:
+            text/plain:
+              schema:
+                type: string
+                examples:
+                  - not implemented
+
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: anontopic_session
+      description: |
+        POST /api/session が発行する HttpOnly Cookie。ブラウザが自動で送るため、
+        フロントエンドのコードがトークンを読むことはない。
+
+  schemas:
+    Session:
+      type: object
+      description: |
+        セッションの有効期限。トークン自体は Cookie でのみ渡すため、ここには含めない。
+      required: [expires_at]
+      properties:
+        expires_at:
+          type: string
+          format: date-time
+          description: これ以降アクセスが無ければセッションが失効する時刻
+          examples:
+            - "2026-08-22T12:24:55.302874Z"
+
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          examples:
+            - ok
+
+    Readiness:
+      type: object
+      required: [status, postgres, redis]
+      properties:
+        status:
+          type: string
+          description: すべて接続できれば ok、そうでなければ unavailable
+          examples:
+            - ok
+        postgres:
+          type: string
+          description: 接続できれば ok、できなければエラー内容
+          examples:
+            - ok
+        redis:
+          type: string
+          examples:
+            - ok
+
+  responses:
+    InternalServerError:
+      description: サーバー側の想定外の失敗
+      content:
+        text/plain:
+          schema:
+            type: string
+            examples:
+              - internal server error
