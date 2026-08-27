@@ -39,6 +39,16 @@ func do(mux *http.ServeMux, method, target, body string, admin bool) *httptest.R
 	return rec
 }
 
+// doWithAuth sends a request carrying an arbitrary Authorization header.
+func doWithAuth(mux *http.ServeMux, method, target, authorization string) *httptest.ResponseRecorder {
+	r := httptest.NewRequest(method, target, nil)
+	r.Header.Set("Authorization", authorization)
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, r)
+	return rec
+}
+
 func decodeBody[T any](t *testing.T, rec *httptest.ResponseRecorder) T {
 	t.Helper()
 
@@ -95,6 +105,24 @@ func TestAdminEndpointsRejectRequestsWithoutTheToken(t *testing.T) {
 	}
 }
 
+func TestAdminEndpointsRejectAWrongToken(t *testing.T) {
+	mux := newTestMux(t, newFakeRepository("雑談"), testAdminToken)
+
+	headers := map[string]string{
+		"a token of another length": adminAuthScheme + "short",
+		"a token of the same length": adminAuthScheme +
+			strings.Repeat("x", len(testAdminToken)),
+		"the token without the scheme": testAdminToken,
+		"another scheme":               "Basic " + testAdminToken,
+	}
+	for what, header := range headers {
+		rec := doWithAuth(mux, http.MethodGet, "/api/admin/topics", header)
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("with %s: status = %d, want %d", what, rec.Code, http.StatusUnauthorized)
+		}
+	}
+}
+
 func TestAdminEndpointsAreNotServedWithoutAConfiguredToken(t *testing.T) {
 	mux := newTestMux(t, newFakeRepository("雑談"), "")
 
@@ -129,6 +157,20 @@ func TestCreateEndpointRejectsAnEmptyName(t *testing.T) {
 	rec := do(mux, http.MethodPost, "/api/admin/topics", `{"name":"  "}`, true)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestCreateEndpointRejectsABodyWithTrailingData(t *testing.T) {
+	mux := newTestMux(t, newFakeRepository(), testAdminToken)
+
+	rec := do(mux, http.MethodPost, "/api/admin/topics", `{"name":"ゲーム"}{"name":"音楽"}`, true)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+
+	listed := decodeBody[listResponse](t, do(mux, http.MethodGet, "/api/topics", "", false))
+	if len(listed.Topics) != 0 {
+		t.Fatalf("topics = %+v, want none", listed.Topics)
 	}
 }
 

@@ -86,11 +86,12 @@ curl localhost:8080/api/topics
 ```
 
 追加・改名・公開停止は管理 API から行う。`ADMIN_API_TOKEN` を設定した環境でだけ
-生えるエンドポイントで、認証方式の背景は
+生えるエンドポイントで、設定していなければ 404 を返す。ローカルで使うには
+`cp .env.example .env` して値を入れてから `make up` する。認証方式の背景は
 [ADR-0007](docs/adr/0007-guard-the-admin-api-with-a-static-bearer-token.md) にある。
 
 ```bash
-TOKEN=local-development-admin-token
+TOKEN=local-development-admin-token   # .env の ADMIN_API_TOKEN と同じ値
 curl -H "Authorization: Bearer $TOKEN" localhost:8080/api/admin/topics
 curl -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"name":"ゲーム"}' localhost:8080/api/admin/topics
