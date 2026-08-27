@@ -19,6 +19,8 @@ tags:
     description: プロセスと依存サービスの状態
   - name: session
     description: 匿名セッションの発行と失効
+  - name: matching
+    description: 待機キューとルームの割当
   - name: chat
     description: ルーム内のリアルタイム通信
   - name: topic
@@ -121,6 +123,120 @@ paths:
               description: Max-Age=0 でクライアントから Cookie を消す
               schema:
                 type: string
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/matching:
+    post:
+      tags: [matching]
+      operationId: joinMatching
+      summary: 待機キューに入り、揃っていればルームを成立させる
+      description: |
+        トピックとルーム種別で分かれた待機キューに入る。キューに必要な人数が揃っていれば
+        その場で会話を成立させ、揃っていなければ待機のまま返す。
+
+        1 人が同時に入れるキューは 1 つで、成立したルームを持っている間は入り直せない。
+        同じキューへの再送は、すでに確保している順番をそのまま保つ。
+
+        3 人ルームは 3 人揃うのを待つが、先頭の利用者が `MATCHING_FALLBACK_AFTER`
+        （既定 60 秒）を超えて待っている場合は 2 人で成立する。このとき返る `room_type`
+        は 2 になる。理由は docs/adr/0009-fall-back-to-a-two-person-room.md にある。
+
+        BAN された識別子はキューに入れず 403 を返す。
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MatchingJoin"
+      responses:
+        "200":
+          description: ルームが成立した
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MatchingState"
+        "202":
+          description: キューに入った。まだ人数が揃っていない
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MatchingState"
+        "400":
+          description: リクエストボディが不正、ルーム種別が 2 でも 3 でもない、または選べないトピック
+          content:
+            text/plain:
+              schema:
+                type: string
+                examples:
+                  - unknown topic
+        "401":
+          $ref: "#/components/responses/SessionUnauthorized"
+        "403":
+          description: BAN された識別子からの要求
+          content:
+            text/plain:
+              schema:
+                type: string
+                examples:
+                  - forbidden
+        "409":
+          description: 別のキューで待機中、またはすでにルームを持っている
+          content:
+            text/plain:
+              schema:
+                type: string
+                examples:
+                  - already waiting in another queue
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    get:
+      tags: [matching]
+      operationId: getMatchingState
+      summary: 待機の状態を返す
+      description: |
+        待機中のクライアントは、ルームが成立するまでこれを繰り返し呼ぶ。
+        呼び出しはルームの成立判定も兼ねるため、3 人ルームの 2 人へのフォールバックは
+        待っている本人のこの要求で起きる。
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: 待機中、またはルームが成立している
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MatchingState"
+        "401":
+          $ref: "#/components/responses/SessionUnauthorized"
+        "404":
+          description: どのキューでも待っておらず、ルームも持っていない
+          content:
+            text/plain:
+              schema:
+                type: string
+                examples:
+                  - not waiting
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    delete:
+      tags: [matching]
+      operationId: leaveMatching
+      summary: 待機をやめる
+      description: |
+        キューから抜ける。待機していないリクエストも同じ結果になるため 204 を返す。
+        すでに成立したルームは取り消さない。
+      security:
+        - sessionCookie: []
+      responses:
+        "204":
+          description: 待機をやめた、またはやめるものが無かった
+        "401":
+          $ref: "#/components/responses/SessionUnauthorized"
         "500":
           $ref: "#/components/responses/InternalServerError"
 
@@ -433,6 +549,71 @@ components:
           examples:
             - false
 
+    MatchingJoin:
+      type: object
+      description: 入りたい待機キュー。
+      required: [topic_id, room_type]
+      properties:
+        topic_id:
+          type: integer
+          description: GET /api/topics が返すトピックの ID
+          minimum: 1
+          examples:
+            - 1
+        room_type:
+          type: integer
+          description: ルーム種別。2 は 2 人ルーム、3 は 3 人ルーム
+          enum: [2, 3]
+          examples:
+            - 3
+
+    MatchingState:
+      type: object
+      description: |
+        待機の状態。`state` が `waiting` の間は `waiting_since` が、`matched` になると
+        `conversation` が入る。
+      required: [state, topic_id, room_type]
+      properties:
+        state:
+          type: string
+          enum: [waiting, matched]
+          examples:
+            - waiting
+        topic_id:
+          type: integer
+          examples:
+            - 1
+        room_type:
+          type: integer
+          description: |
+            成立したルームの人数。3 人ルームで待っていても、フォールバックで成立した
+            場合は 2 になる
+          enum: [2, 3]
+          examples:
+            - 2
+        waiting_since:
+          type: string
+          format: date-time
+          description: 待機を始めた時刻。`state` が `waiting` のときに入る
+          examples:
+            - "2026-08-27T07:13:01.562Z"
+        conversation:
+          type: object
+          description: 参加する会話。`state` が `matched` のときに入る
+          required: [id, started_at]
+          properties:
+            id:
+              type: string
+              format: uuid
+              description: WebSocket の接続先になる会話 ID
+              examples:
+                - 7f1fca8f-ca30-40c7-a752-ef5ffa6bac2a
+            started_at:
+              type: string
+              format: date-time
+              examples:
+                - "2026-08-27T07:13:01.595Z"
+
     Health:
       type: object
       required: [status]
@@ -464,6 +645,15 @@ components:
   responses:
     AdminUnauthorized:
       description: 管理トークンが無い、または一致しない
+      content:
+        text/plain:
+          schema:
+            type: string
+            examples:
+              - unauthorized
+
+    SessionUnauthorized:
+      description: 有効なセッションが無い
       content:
         text/plain:
           schema:

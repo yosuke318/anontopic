@@ -106,6 +106,17 @@ func (s *Service) ListActive(ctx context.Context) ([]Topic, error) {
 	return slices.Clone(topics), nil
 }
 
+// IsActive reports whether users can be offered the topic with the given ID.
+// It reads the same cached list the selection screen is drawn from.
+func (s *Service) IsActive(ctx context.Context, id int) (bool, error) {
+	topics, err := s.ListActive(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	return slices.ContainsFunc(topics, func(t Topic) bool { return t.ID == id }), nil
+}
+
 // List returns every topic, active or not. It is read straight from
 // PostgreSQL so that an administrator sees the effect of their own writes.
 func (s *Service) List(ctx context.Context) ([]Topic, error) {

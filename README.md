@@ -102,6 +102,29 @@ curl -X PATCH -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/js
 会話から参照されているトピックは削除できず、409 を返す。選択画面から消すには
 `is_active` を false にする。
 
+### マッチング
+
+トピックとルーム種別（2 人 / 3 人）ごとの待機キューに入り、人数が揃った時点で会話が
+成立する。キューは Redis に置き、取り出しは Lua スクリプトで原子的に行うため、
+サーバーが複数台でも 1 人が 2 つのルームに入ることはない。設計の理由は
+[ADR-0008](docs/adr/0008-hold-the-matching-queue-in-a-redis-sorted-set.md) にある。
+
+```bash
+curl -X POST localhost:8080/api/session -c cookie.txt   # 先にセッションが要る
+curl -X POST -b cookie.txt -H 'Content-Type: application/json' \
+  -d '{"topic_id":1,"room_type":2}' localhost:8080/api/matching   # 待機に入る
+curl -b cookie.txt localhost:8080/api/matching                     # 状態を問い合わせる
+curl -X DELETE -b cookie.txt localhost:8080/api/matching           # 待機をやめる
+```
+
+`POST` は成立すれば 200、待機のままなら 202 を返す。待機中のクライアントは `GET` を
+繰り返し呼び、`state` が `matched` になったところで返ってきた会話 ID を使って
+`/ws/rooms/{roomID}` につなぐ。
+
+3 人ルームは 3 人揃うのを待つが、先頭の利用者が `MATCHING_FALLBACK_AFTER` を超えて
+待っている場合は 2 人で成立し、`room_type` に 2 が返る。理由は
+[ADR-0009](docs/adr/0009-fall-back-to-a-two-person-room.md) にある。
+
 エンドポイントの仕様は [docs/openapi.yaml](docs/openapi.yaml) にある。手元で読むには
 `npx @redocly/cli preview-docs docs/openapi.yaml`、検査するには
 `npx @redocly/cli lint docs/openapi.yaml` を使う。
@@ -117,6 +140,8 @@ API サーバーの設定は環境変数で行う。
 | `SESSION_IP_HASH_SECRET` | プロセス起動ごとの乱数 | IP ハッシュの鍵。未設定だと再起動でハッシュが変わり、ハッシュに紐づく BAN が外れる |
 | `ADMIN_API_TOKEN` | なし | トピック管理 API が要求する Bearer トークン。未設定だと管理エンドポイントを登録しない |
 | `TOPIC_CACHE_TTL` | `5m` | トピック一覧をプロセス内に保持する時間。`300s` のような Go の duration 表記 |
+| `MATCHING_WAIT_TTL` | `5m` | 待機キューに並び続けられる時間。超えた利用者はキューから外れる |
+| `MATCHING_FALLBACK_AFTER` | `60s` | 3 人ルームの待機がこの時間を超えたら 2 人で成立させる |
 
 ### スキーマとデータ
 
