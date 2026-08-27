@@ -59,6 +59,11 @@ var (
 
 	// ErrAlreadyMatched is returned when the caller already has a conversation.
 	ErrAlreadyMatched = errors.New("matching: already matched")
+
+	// ErrDuplicateParticipant is returned when a room is formed with the same
+	// session token twice, which would leave the room type of the conversation
+	// higher than the number of participants recorded in it.
+	ErrDuplicateParticipant = errors.New("matching: duplicate participant")
 )
 
 // Queue identifies one waiting queue: the topic its users picked and the type

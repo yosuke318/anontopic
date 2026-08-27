@@ -3,6 +3,7 @@ package matching
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"time"
@@ -154,12 +155,18 @@ func newStateResponse(state State) stateResponse {
 
 // decodeJSON reads the request body into dst and answers 400 if it cannot.
 // The body must hold exactly one JSON value: anything after it is a request
-// the client did not mean to send the way this handler would read it.
+// the client did not mean to send the way this handler would read it, so the
+// body has to be at its end once the value is read.
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRequestBytes))
 	dec.DisallowUnknownFields()
 
-	if err := dec.Decode(dst); err != nil || dec.More() {
+	if err := dec.Decode(dst); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return false
+	}
+
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return false
 	}

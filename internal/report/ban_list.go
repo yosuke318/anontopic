@@ -31,7 +31,7 @@ func (b *PostgresBanList) IsBanned(ctx context.Context, ipHash string) (bool, er
 			"AND (banned_until IS NULL OR banned_until > now()))",
 		ipHashIdentifier, ipHash).Scan(&banned)
 	if err != nil {
-		return false, fmt.Errorf("read ban list: %w", err)
+		return false, fmt.Errorf("query banned identifiers: %w", err)
 	}
 	return banned, nil
 }

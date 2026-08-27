@@ -28,6 +28,13 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 // token that appears twice; the reasoning is in
 // docs/adr/0003-one-row-per-conversation-participant.md.
 func (r *PostgresRepository) CreateConversation(ctx context.Context, topicID int, participants []string) (Conversation, error) {
+	// The room type counts the participants, while the unique constraint keeps
+	// one row per token. A token appearing twice would make the two disagree,
+	// and the number of participants is read from the rows.
+	if token, ok := duplicate(participants); ok {
+		return Conversation{}, fmt.Errorf("%w: %s", ErrDuplicateParticipant, token)
+	}
+
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return Conversation{}, fmt.Errorf("begin transaction: %w", err)
@@ -52,6 +59,18 @@ func (r *PostgresRepository) CreateConversation(ctx context.Context, topicID int
 
 	conv.StartedAt = conv.StartedAt.UTC()
 	return conv, nil
+}
+
+// duplicate returns the first token participants holds more than once.
+func duplicate(participants []string) (string, bool) {
+	seen := make(map[string]struct{}, len(participants))
+	for _, token := range participants {
+		if _, ok := seen[token]; ok {
+			return token, true
+		}
+		seen[token] = struct{}{}
+	}
+	return "", false
 }
 
 // insertParticipants records every participant of one conversation.
