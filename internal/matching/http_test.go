@@ -162,6 +162,8 @@ func TestJoinEndpointRefusesRequestsItCannotQueue(t *testing.T) {
 		want  int
 	}{
 		{"body that is not the expected shape", "alice", `{"topic":1}`, http.StatusBadRequest},
+		{"a second JSON value after the body", "alice", `{"topic_id":1,"room_type":2}{}`, http.StatusBadRequest},
+		{"a stray bracket after the body", "alice", `{"topic_id":1,"room_type":2}]`, http.StatusBadRequest},
 		{"room type no conversation can have", "alice", `{"topic_id":1,"room_type":4}`, http.StatusBadRequest},
 		{"topic that is not offered", "alice", `{"topic_id":99,"room_type":2}`, http.StatusBadRequest},
 		{"banned identifier", "banned", `{"topic_id":1,"room_type":2}`, http.StatusForbidden},

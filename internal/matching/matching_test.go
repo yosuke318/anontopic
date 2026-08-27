@@ -3,6 +3,7 @@ package matching
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strconv"
 	"sync"
@@ -67,8 +68,14 @@ func (s *fakeStore) FormRoom(_ context.Context, q Queue, now time.Time, ttl, fal
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// A wait that ran out leaves the queue, and the entry that says where the
+	// token waits goes with it, the way its key expires in Redis.
 	queue := slices.DeleteFunc(s.queues[q], func(e entry) bool {
-		return !e.since.After(now.Add(-ttl))
+		if e.since.After(now.Add(-ttl)) {
+			return false
+		}
+		delete(s.waiting, e.token)
+		return true
 	})
 	s.queues[q] = queue
 
@@ -173,6 +180,9 @@ func (r *fakeRepository) CreateConversation(_ context.Context, topicID int, part
 
 	if r.err != nil {
 		return Conversation{}, r.err
+	}
+	if token, ok := duplicate(participants); ok {
+		return Conversation{}, fmt.Errorf("%w: %s", ErrDuplicateParticipant, token)
 	}
 
 	conv := Conversation{
@@ -329,6 +339,24 @@ func TestAWaitThatRanOutLeavesTheQueue(t *testing.T) {
 	second := join(t, svc, "bob", q)
 	if second.Kind != StateWaiting {
 		t.Fatalf("kind = %v, want %v", second.Kind, StateWaiting)
+	}
+}
+
+func TestAWaitThatRanOutIsNoLongerWaiting(t *testing.T) {
+	store := newFakeStore()
+	svc, clock := newTestService(t, store, newFakeRepository())
+	q := Queue{TopicID: 1, RoomType: 2}
+
+	join(t, svc, "alice", q)
+	clock.Advance(DefaultWaitTTL)
+	join(t, svc, "bob", q)
+
+	state, err := store.Lookup(context.Background(), "alice")
+	if err != nil {
+		t.Fatalf("Lookup: %v", err)
+	}
+	if state.Kind != StateIdle {
+		t.Fatalf("kind = %v, want %v", state.Kind, StateIdle)
 	}
 }
 
