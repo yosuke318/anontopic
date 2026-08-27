@@ -1,6 +1,7 @@
 package topic
 
 import (
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -22,22 +23,31 @@ const (
 
 // Handler exposes the topic module's HTTP surface.
 type Handler struct {
-	svc        *Service
-	adminToken string
+	svc *Service
+
+	// adminEnabled says whether a token is configured, and adminTokenSum is
+	// its digest. Holding the digest rather than the token gives the guard two
+	// values of equal length to compare, whatever the caller presents.
+	adminEnabled  bool
+	adminTokenSum [sha256.Size]byte
 }
 
 // NewHandler builds a handler around svc. adminToken is the secret the
 // administration endpoints require; when it is empty they are not served at
 // all, so a deployment without a secret has no write surface.
 func NewHandler(svc *Service, adminToken string) *Handler {
-	return &Handler{svc: svc, adminToken: adminToken}
+	return &Handler{
+		svc:           svc,
+		adminEnabled:  adminToken != "",
+		adminTokenSum: sha256.Sum256([]byte(adminToken)),
+	}
 }
 
 // Register mounts the module's routes onto mux.
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/topics", h.handleList)
 
-	if h.adminToken == "" {
+	if !h.adminEnabled {
 		return
 	}
 
@@ -175,10 +185,14 @@ func (h *Handler) handleDelete(w http.ResponseWriter, r *http.Request) {
 // requireAdmin rejects requests that do not carry the admin token.
 func (h *Handler) requireAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		presented, ok := strings.CutPrefix(r.Header.Get("Authorization"), adminAuthScheme)
-		// The comparison takes the same time whatever the token is, so that
-		// the answer does not tell a caller how much of it was right.
-		if !ok || subtle.ConstantTimeCompare([]byte(presented), []byte(h.adminToken)) != 1 {
+		presented, hasScheme := strings.CutPrefix(r.Header.Get("Authorization"), adminAuthScheme)
+
+		// Both sides are compared as digests, which are always the same
+		// length: ConstantTimeCompare gives up as soon as the lengths differ,
+		// so comparing the tokens themselves would time out faster for a
+		// guess of the wrong length and leak how long the secret is.
+		presentedSum := sha256.Sum256([]byte(presented))
+		if !hasScheme || subtle.ConstantTimeCompare(presentedSum[:], h.adminTokenSum[:]) != 1 {
 			w.Header().Set("WWW-Authenticate", "Bearer")
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
@@ -199,11 +213,13 @@ func topicID(w http.ResponseWriter, r *http.Request) (int, bool) {
 }
 
 // decodeJSON reads the request body into dst and answers 400 if it cannot.
+// The body must hold exactly one JSON value: anything after it is a request
+// the client did not mean to send the way this handler would read it.
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRequestBytes))
 	dec.DisallowUnknownFields()
 
-	if err := dec.Decode(dst); err != nil {
+	if err := dec.Decode(dst); err != nil || dec.More() {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return false
 	}
