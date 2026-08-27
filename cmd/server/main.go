@@ -24,6 +24,8 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/yosuke318/anontopic/internal/chat"
+	"github.com/yosuke318/anontopic/internal/matching"
+	"github.com/yosuke318/anontopic/internal/report"
 	"github.com/yosuke318/anontopic/internal/session"
 	"github.com/yosuke318/anontopic/internal/topic"
 )
@@ -87,6 +89,17 @@ func run() error {
 		CacheTTL: envDuration("TOPIC_CACHE_TTL", topic.DefaultCacheTTL),
 	})
 
+	matches := matching.NewService(
+		matching.NewRedisStore(rdb),
+		matching.NewPostgresRepository(pool),
+		topics,
+		report.NewPostgresBanList(pool),
+		matching.Options{
+			WaitTTL:       envDuration("MATCHING_WAIT_TTL", matching.DefaultWaitTTL),
+			FallbackAfter: envDuration("MATCHING_FALLBACK_AFTER", matching.DefaultFallbackAfter),
+		},
+	)
+
 	adminToken := os.Getenv("ADMIN_API_TOKEN")
 	if adminToken == "" {
 		slog.Warn("ADMIN_API_TOKEN is unset, the topic administration endpoints are not served")
@@ -98,6 +111,7 @@ func run() error {
 	session.NewHandler(sessions).Register(mux)
 	chat.NewHandler(sessions, allowedOrigins).Register(mux)
 	topic.NewHandler(topics, adminToken).Register(mux)
+	matching.NewHandler(matches, sessions).Register(mux)
 
 	srv := &http.Server{
 		Addr:              addr,
