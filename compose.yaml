@@ -52,6 +52,7 @@ services:
       # ローカルは http で配信するため、Secure 付きの Cookie はブラウザに保存されない。
       SESSION_COOKIE_SECURE: "false"
       SESSION_IP_HASH_SECRET: ${SESSION_IP_HASH_SECRET:-local-development-secret}
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:-local-development-admin-token}
     ports:
       - "${API_PORT:-8080}:8080"
     volumes:

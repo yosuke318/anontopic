@@ -25,6 +25,7 @@ import (
 
 	"github.com/yosuke318/anontopic/internal/chat"
 	"github.com/yosuke318/anontopic/internal/session"
+	"github.com/yosuke318/anontopic/internal/topic"
 )
 
 const (
@@ -82,11 +83,21 @@ func run() error {
 	addr := envOr("APP_ADDR", defaultAddr)
 	allowedOrigins := splitList(envOr("APP_ALLOWED_ORIGINS", defaultAllowedOrigins))
 
+	topics := topic.NewService(topic.NewPostgresRepository(pool), topic.Options{
+		CacheTTL: envDuration("TOPIC_CACHE_TTL", topic.DefaultCacheTTL),
+	})
+
+	adminToken := os.Getenv("ADMIN_API_TOKEN")
+	if adminToken == "" {
+		slog.Warn("ADMIN_API_TOKEN is unset, the topic administration endpoints are not served")
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", handleHealth)
 	mux.HandleFunc("GET /readyz", handleReady(pool, rdb))
 	session.NewHandler(sessions).Register(mux)
 	chat.NewHandler(sessions, allowedOrigins).Register(mux)
+	topic.NewHandler(topics, adminToken).Register(mux)
 
 	srv := &http.Server{
 		Addr:              addr,
@@ -210,8 +221,8 @@ func withCORS(allowedOrigins []string, next http.Handler) http.Handler {
 			header.Set("Access-Control-Allow-Credentials", "true")
 
 			if r.Method == http.MethodOptions {
-				header.Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-				header.Set("Access-Control-Allow-Headers", "Content-Type")
+				header.Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+				header.Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
 				w.WriteHeader(http.StatusNoContent)
 				return
 			}
@@ -232,6 +243,14 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func envDuration(key string, fallback time.Duration) time.Duration {
+	d, err := time.ParseDuration(os.Getenv(key))
+	if err != nil {
+		return fallback
+	}
+	return d
 }
 
 func envBool(key string, fallback bool) bool {
