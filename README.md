@@ -75,6 +75,32 @@ curl -i -X DELETE localhost:8080/api/session -b cookie.txt # 明示的な離脱�
 
 `/ws/rooms/{roomID}` は有効なセッションが無いと 401 を返す。
 
+### トピック
+
+トピック選択画面は `GET /api/topics` の結果だけで描画する。返るのは `is_active` が
+true のトピックだけで、API サーバーはこれをプロセス内に一定時間キャッシュする。
+理由は [ADR-0006](docs/adr/0006-cache-the-topic-list-in-process.md) にある。
+
+```bash
+curl localhost:8080/api/topics
+```
+
+追加・改名・公開停止は管理 API から行う。`ADMIN_API_TOKEN` を設定した環境でだけ
+生えるエンドポイントで、認証方式の背景は
+[ADR-0007](docs/adr/0007-guard-the-admin-api-with-a-static-bearer-token.md) にある。
+
+```bash
+TOKEN=local-development-admin-token
+curl -H "Authorization: Bearer $TOKEN" localhost:8080/api/admin/topics
+curl -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"name":"ゲーム"}' localhost:8080/api/admin/topics
+curl -X PATCH -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"is_active":false}' localhost:8080/api/admin/topics/1
+```
+
+会話から参照されているトピックは削除できず、409 を返す。選択画面から消すには
+`is_active` を false にする。
+
 エンドポイントの仕様は [docs/openapi.yaml](docs/openapi.yaml) にある。手元で読むには
 `npx @redocly/cli preview-docs docs/openapi.yaml`、検査するには
 `npx @redocly/cli lint docs/openapi.yaml` を使う。
@@ -88,6 +114,8 @@ API サーバーの設定は環境変数で行う。
 | `SESSION_COOKIE_SECURE` | `true` | Cookie に `Secure` を付ける。http のローカルでは `false` |
 | `SESSION_COOKIE_SAMESITE` | `lax` | `lax` / `strict` / `none`。`none` は `SESSION_COOKIE_SECURE=true` が必要 |
 | `SESSION_IP_HASH_SECRET` | プロセス起動ごとの乱数 | IP ハッシュの鍵。未設定だと再起動でハッシュが変わり、ハッシュに紐づく BAN が外れる |
+| `ADMIN_API_TOKEN` | なし | トピック管理 API が要求する Bearer トークン。未設定だと管理エンドポイントを登録しない |
+| `TOPIC_CACHE_TTL` | `5m` | トピック一覧をプロセス内に保持する時間。`300s` のような Go の duration 表記 |
 
 ### スキーマとデータ
 

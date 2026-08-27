@@ -21,6 +21,8 @@ tags:
     description: 匿名セッションの発行と失効
   - name: chat
     description: ルーム内のリアルタイム通信
+  - name: topic
+    description: トピックの一覧と管理
 
 paths:
   /healthz:
@@ -170,8 +172,162 @@ paths:
                 examples:
                   - not implemented
 
+  /api/topics:
+    get:
+      tags: [topic]
+      operationId: listTopics
+      summary: 選択できるトピックの一覧を返す
+      security: []
+      description: |
+        `is_active = true` のトピックだけを ID 昇順で返す。トピック選択画面は、
+        この結果だけで描画できる。
+
+        内容の更新頻度が低いため、API サーバーはプロセス内に一定時間キャッシュする
+        （既定 5 分、`TOPIC_CACHE_TTL` で変更可能）。管理 API で変更した内容が
+        全サーバーに反映されるまで、最大でその時間かかる。理由は
+        docs/adr/0006-cache-the-topic-list-in-process.md にある。
+      responses:
+        "200":
+          description: 有効なトピックの一覧
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TopicList"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/admin/topics:
+    get:
+      tags: [topic]
+      operationId: listAllTopics
+      summary: 無効なものを含む全トピックを返す
+      security:
+        - adminToken: []
+      responses:
+        "200":
+          description: 全トピックの一覧
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminTopicList"
+        "401":
+          $ref: "#/components/responses/AdminUnauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    post:
+      tags: [topic]
+      operationId: createTopic
+      summary: トピックを追加する
+      description: 追加したトピックは有効な状態で作られ、選択画面に出る。
+      security:
+        - adminToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TopicCreate"
+      responses:
+        "201":
+          description: 追加した
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminTopic"
+        "400":
+          $ref: "#/components/responses/InvalidTopicRequest"
+        "401":
+          $ref: "#/components/responses/AdminUnauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/admin/topics/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: トピックID
+        schema:
+          type: integer
+          minimum: 1
+
+    patch:
+      tags: [topic]
+      operationId: updateTopic
+      summary: トピックの名前や有効フラグを変える
+      description: |
+        省略したフィールドは変更しない。`is_active` を false にすると選択画面から
+        消えるが、そのトピックを参照している会話はそのまま残る。
+      security:
+        - adminToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TopicUpdate"
+      responses:
+        "200":
+          description: 変更後のトピック
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminTopic"
+        "400":
+          $ref: "#/components/responses/InvalidTopicRequest"
+        "401":
+          $ref: "#/components/responses/AdminUnauthorized"
+        "404":
+          $ref: "#/components/responses/TopicNotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    delete:
+      tags: [topic]
+      operationId: deleteTopic
+      summary: トピックを削除する
+      description: |
+        会話から参照されているトピックは削除できない。その場合は 409 を返すため、
+        選択画面から消すには `is_active` を false にする。
+      security:
+        - adminToken: []
+      responses:
+        "204":
+          description: 削除した
+        "400":
+          description: トピックIDが数値でない
+          content:
+            text/plain:
+              schema:
+                type: string
+                examples:
+                  - invalid topic id
+        "401":
+          $ref: "#/components/responses/AdminUnauthorized"
+        "404":
+          $ref: "#/components/responses/TopicNotFound"
+        "409":
+          description: 会話から参照されているため削除できない
+          content:
+            text/plain:
+              schema:
+                type: string
+                examples:
+                  - topic is referenced by conversations
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
 components:
   securitySchemes:
+    adminToken:
+      type: http
+      scheme: bearer
+      description: |
+        `ADMIN_API_TOKEN` に設定した秘密。未設定の環境では管理エンドポイント自体を
+        登録しないため、そのパスは 404 を返す。方式の背景は
+        docs/adr/0007-guard-the-admin-api-with-a-static-bearer-token.md にある。
+
     sessionCookie:
       type: apiKey
       in: cookie
@@ -193,6 +349,89 @@ components:
           description: これ以降アクセスが無ければセッションが失効する時刻
           examples:
             - "2026-08-22T12:24:55.302874Z"
+
+    Topic:
+      type: object
+      description: 選択画面が 1 件を描画するのに必要な情報。
+      required: [id, name]
+      properties:
+        id:
+          type: integer
+          examples:
+            - 1
+        name:
+          type: string
+          maxLength: 100
+          examples:
+            - 雑談
+
+    TopicList:
+      type: object
+      required: [topics]
+      properties:
+        topics:
+          type: array
+          items:
+            $ref: "#/components/schemas/Topic"
+
+    AdminTopic:
+      type: object
+      description: 管理操作で扱う 1 件。
+      required: [id, name, is_active, created_at]
+      properties:
+        id:
+          type: integer
+          examples:
+            - 1
+        name:
+          type: string
+          maxLength: 100
+          examples:
+            - 雑談
+        is_active:
+          type: boolean
+          description: false のトピックは GET /api/topics に出ない
+          examples:
+            - true
+        created_at:
+          type: string
+          format: date-time
+          examples:
+            - "2026-08-26T09:12:03.482913Z"
+
+    AdminTopicList:
+      type: object
+      required: [topics]
+      properties:
+        topics:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminTopic"
+
+    TopicCreate:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          description: 前後の空白は取り除いて保存する。空文字と 100 文字超は 400
+          maxLength: 100
+          examples:
+            - ゲーム
+
+    TopicUpdate:
+      type: object
+      description: 省略したフィールドは変更しない。
+      properties:
+        name:
+          type: string
+          maxLength: 100
+          examples:
+            - ゲーム
+        is_active:
+          type: boolean
+          examples:
+            - false
 
     Health:
       type: object
@@ -223,6 +462,33 @@ components:
             - ok
 
   responses:
+    AdminUnauthorized:
+      description: 管理トークンが無い、または一致しない
+      content:
+        text/plain:
+          schema:
+            type: string
+            examples:
+              - unauthorized
+
+    InvalidTopicRequest:
+      description: リクエストボディが不正、またはトピック名が空か長すぎる
+      content:
+        text/plain:
+          schema:
+            type: string
+            examples:
+              - invalid topic name
+
+    TopicNotFound:
+      description: そのIDのトピックが無い
+      content:
+        text/plain:
+          schema:
+            type: string
+            examples:
+              - topic not found
+
     InternalServerError:
       description: サーバー側の想定外の失敗
       content:
