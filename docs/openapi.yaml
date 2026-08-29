@@ -246,23 +246,46 @@ paths:
       operationId: connectRoomSocket
       summary: ルームの WebSocket 接続を確立する
       description: |
-        現時点ではセッション Cookie を検証するだけで、WebSocket へのアップグレードは
-        まだ行わない。ハンドシェイク（101 応答とそれ以降のメッセージ形式）はルームの
-        参加・配送を実装するときに合わせてこの仕様へ追記する。
+        マッチングで成立した会話に接続する。`roomID` は `/api/matching` が返した会話 ID。
 
-        Origin ヘッダが APP_ALLOWED_ORIGINS にも自ホストにも一致しない場合は、
+        Origin ヘッダが `APP_ALLOWED_ORIGINS` にも自ホストにも一致しない場合は、
         セッションを検証する前に 403 で拒否する。検証はセッションの寿命を延ばすため、
         他サイトのページが他人のセッションを延命できないようにしている。
+        会話の参加者でない場合と、会話が存在しない場合は区別せず 403 を返す。
+
+        接続後はテキストフレームで JSON をやり取りする。クライアントが送るのは
+        メッセージのみで、サーバーからは以下の `type` が届く。サーバーは 30 秒ごとに
+        ping を送るため、ブラウザ以外のクライアントは pong を返す必要がある。
+
+        | `type` | 内容 |
+        | --- | --- |
+        | `joined` | 接続した本人への挨拶。`conversation` / `participant`（自分の番号）/ `present`（接続中の参加者の番号）が入る |
+        | `participant_joined` | 誰かが入室した。自分の入室も届く |
+        | `participant_left` | 誰かが退出した |
+        | `message` | メッセージ。`id` / `participant`（送信者の番号）/ `body` / `sent_at` が入る。送信者にも同じものが届く |
+        | `ended` | 会話が終了した。`reason` は `conversations.end_reason` の値。これを最後にサーバーが接続を閉じる |
+        | `error` | 送信者だけに返る。`code` は `invalid_frame` / `empty_body` / `too_long` / `blocked` / `unavailable` |
+
+        参加者は会話ごとの番号（1 起点）で表す。セッショントークンは他の参加者に渡らない。
+        本文が 2000 文字を超えるメッセージは `too_long` で拒否する。
+
+        接続中の参加者が 1 人以下のまま `CHAT_REJOIN_GRACE` を過ぎると、会話は
+        `user_left` で終了する。切断してから猶予の間は同じ会話に再接続でき、
+        参加者が増えることはない。理由は
+        [ADR-0011](adr/0011-end-a-conversation-after-a-rejoin-grace.md) にある。
       security:
         - sessionCookie: []
       parameters:
         - name: roomID
           in: path
           required: true
-          description: 接続先のルーム
+          description: 接続先の会話 ID
           schema:
             type: string
+            format: uuid
       responses:
+        "101":
+          description: WebSocket に切り替えた
         "401":
           description: 有効なセッションが無い
           content:
@@ -272,21 +295,23 @@ paths:
                 examples:
                   - unauthorized
         "403":
-          description: 許可されていない Origin からの接続
+          description: 許可されていない Origin からの接続、または参加者でない会話への接続
           content:
             text/plain:
               schema:
                 type: string
                 examples:
                   - forbidden
-        "501":
-          description: 認証は通ったが、ルームの処理が未実装
+        "410":
+          description: 会話が既に終了している
           content:
             text/plain:
               schema:
                 type: string
                 examples:
-                  - not implemented
+                  - the conversation has ended
+        "500":
+          $ref: "#/components/responses/InternalServerError"
 
   /api/topics:
     get:
