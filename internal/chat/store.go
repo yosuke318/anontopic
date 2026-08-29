@@ -27,8 +27,9 @@ type Store interface {
 	Join(ctx context.Context, conversationID, token string, now time.Time, ttl time.Duration) ([]string, error)
 
 	// Heartbeat keeps token connected for another ttl and returns every token
-	// connected to conversationID. A token that has not been kept for longer
-	// than ttl is dropped, which is what a server that died leaves behind.
+	// connected to conversationID. A token that has not been kept within the
+	// last ttl is dropped, an entry exactly that old included, which is what a
+	// server that died leaves behind.
 	Heartbeat(ctx context.Context, conversationID, token string, now time.Time, ttl time.Duration) ([]string, error)
 
 	// Leave drops token from the participants connected to conversationID
