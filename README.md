@@ -125,6 +125,26 @@ curl -X DELETE -b cookie.txt localhost:8080/api/matching           # 待機を�
 待っている場合は 2 人で成立し、`room_type` に 2 が返る。理由は
 [ADR-0009](docs/adr/0009-fall-back-to-a-two-person-room.md) にある。
 
+### チャット
+
+成立した会話には `/ws/rooms/{roomID}` に WebSocket でつなぐ。`roomID` はマッチングが返した
+会話 ID で、接続はセッション Cookie で認証する。Origin が `APP_ALLOWED_ORIGINS` にも
+自ホストにも一致しない接続は、セッションに触れる前に拒否する。
+
+メッセージは Redis Pub/Sub を通してサーバー間で配送するため、参加者がそれぞれ別のサーバーに
+つないでいても届く。参加者はセッショントークンではなく会話ごとの番号（1 起点）で表し、
+トークンが他の参加者に渡ることはない。送信前にモデレーションの判定を通し、ブロックされた
+メッセージは送信者にだけ理由が返る。
+
+片方が切断すると、残った参加者にはすぐ退出が伝わる。接続中の参加者が 1 人以下のまま
+`CHAT_REJOIN_GRACE` を過ぎると会話が終了し、`conversations.ended_at` と `end_reason` に
+記録される。猶予の間は同じ会話に再接続でき、参加者が増えることはない。理由は
+[ADR-0011](docs/adr/0011-end-a-conversation-after-a-rejoin-grace.md)、会話のテーブルを
+どのモジュールが書くかは
+[ADR-0010](docs/adr/0010-split-the-conversation-tables-by-lifecycle-phase.md) にある。
+
+やり取りするフレームの形式は [docs/openapi.yaml](docs/openapi.yaml) に書いてある。
+
 エンドポイントの仕様は [docs/openapi.yaml](docs/openapi.yaml) にある。手元で読むには
 `npx @redocly/cli preview-docs docs/openapi.yaml`、検査するには
 `npx @redocly/cli lint docs/openapi.yaml` を使う。
@@ -142,6 +162,7 @@ API サーバーの設定は環境変数で行う。
 | `TOPIC_CACHE_TTL` | `5m` | トピック一覧をプロセス内に保持する時間。`300s` のような Go の duration 表記 |
 | `MATCHING_WAIT_TTL` | `5m` | 待機キューに並び続けられる時間。超えた利用者はキューから外れる |
 | `MATCHING_FALLBACK_AFTER` | `60s` | 3 人ルームの待機がこの時間を超えたら 2 人で成立させる |
+| `CHAT_REJOIN_GRACE` | `30s` | 切断した参加者を待つ時間。接続中が 1 人以下のままこの時間を超えると会話を終了する |
 
 ### スキーマとデータ
 

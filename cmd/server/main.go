@@ -109,7 +109,7 @@ func run() error {
 	mux.HandleFunc("GET /healthz", handleHealth)
 	mux.HandleFunc("GET /readyz", handleReady(pool, rdb))
 	session.NewHandler(sessions).Register(mux)
-	chat.NewHandler(sessions, allowedOrigins).Register(mux)
+	chat.NewHandler(newChatService(pool, rdb), sessions, allowedOrigins).Register(mux)
 	topic.NewHandler(topics, adminToken).Register(mux)
 	matching.NewHandler(matches, sessions).Register(mux)
 
@@ -172,6 +172,21 @@ func handleReady(pool *pgxpool.Pool, rdb *redis.Client) http.HandlerFunc {
 
 		writeJSON(w, status, body)
 	}
+}
+
+// newChatService builds the chat module from the environment. No moderation
+// is wired into it, so a message reaches the room as it was written.
+func newChatService(pool *pgxpool.Pool, rdb *redis.Client) *chat.Service {
+	slog.Warn("no moderation is wired into chat, messages are delivered without being judged")
+
+	return chat.NewService(
+		chat.NewPostgresRepository(pool),
+		chat.NewRedisStore(rdb),
+		nil,
+		chat.Options{
+			RejoinGrace: envDuration("CHAT_REJOIN_GRACE", chat.DefaultRejoinGrace),
+		},
+	)
 }
 
 // newSessionService builds the session module from the environment.
