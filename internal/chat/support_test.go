@@ -116,7 +116,9 @@ func (s *fakeStore) record(conversationID, token string, now time.Time, ttl time
 
 	tokens := make([]string, 0, len(room))
 	for t, at := range room {
-		if now.Sub(at) > ttl {
+		// The Redis store drops an entry that is exactly ttl old, so this one
+		// has to drop it as well for a test to exercise the same boundary.
+		if now.Sub(at) >= ttl {
 			delete(room, t)
 			continue
 		}
