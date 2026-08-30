@@ -105,11 +105,13 @@ func run() error {
 		slog.Warn("ADMIN_API_TOKEN is unset, the topic administration endpoints are not served")
 	}
 
+	chats := newChatService(pool, rdb)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", handleHealth)
 	mux.HandleFunc("GET /readyz", handleReady(pool, rdb))
 	session.NewHandler(sessions).Register(mux)
-	chat.NewHandler(newChatService(pool, rdb), sessions, allowedOrigins).Register(mux)
+	chat.NewHandler(chats, sessions, allowedOrigins).Register(mux)
 	topic.NewHandler(topics, adminToken).Register(mux)
 	matching.NewHandler(matches, sessions).Register(mux)
 
@@ -139,7 +141,12 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 
-	return srv.Shutdown(shutdownCtx)
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		return err
+	}
+
+	// The messages the rooms took are recorded before the process exits.
+	return chats.Close(shutdownCtx)
 }
 
 // handleHealth reports that the process itself is running. It must not touch

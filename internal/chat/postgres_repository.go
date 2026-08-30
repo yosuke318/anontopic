@@ -68,20 +68,26 @@ func (r *PostgresRepository) Conversation(ctx context.Context, id string) (Conve
 	return conv, nil
 }
 
-// AddMessage records one message of a conversation.
-func (r *PostgresRepository) AddMessage(ctx context.Context, conversationID, senderToken, body string, flag int) (Message, error) {
-	msg := Message{SenderToken: senderToken, Body: body}
-
-	row := r.pool.QueryRow(ctx,
-		"INSERT INTO messages (conversation_id, sender_token, body, moderation_flag) "+
-			"VALUES ($1, $2, $3, $4) RETURNING id, created_at",
-		conversationID, senderToken, body, flag)
-	if err := row.Scan(&msg.ID, &msg.CreatedAt); err != nil {
-		return Message{}, fmt.Errorf("insert message: %w", err)
+// AddMessages records messages in one round trip. Each row carries the time
+// its message was taken, which is what decides the partition it goes to.
+func (r *PostgresRepository) AddMessages(ctx context.Context, messages []Message) error {
+	if len(messages) == 0 {
+		return nil
 	}
 
-	msg.CreatedAt = msg.CreatedAt.UTC()
-	return msg, nil
+	batch := &pgx.Batch{}
+	for _, msg := range messages {
+		batch.Queue(
+			"INSERT INTO messages (conversation_id, sender_token, body, moderation_flag, created_at) "+
+				"VALUES ($1, $2, $3, $4, $5)",
+			msg.ConversationID, msg.SenderToken, msg.Body, msg.Flag, msg.CreatedAt)
+	}
+
+	if err := r.pool.SendBatch(ctx, batch).Close(); err != nil {
+		return fmt.Errorf("insert messages: %w", err)
+	}
+
+	return nil
 }
 
 // End records that a conversation finished. Only the first call writes, so

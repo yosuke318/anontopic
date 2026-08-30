@@ -13,10 +13,10 @@ type Repository interface {
 	// ErrConversationNotFound when there is no such conversation.
 	Conversation(ctx context.Context, id string) (Conversation, error)
 
-	// AddMessage records one message of a conversation and returns it with
-	// the id and time the store gave it. flag is the moderation flag the
-	// message was judged with.
-	AddMessage(ctx context.Context, conversationID, senderToken, body string, flag int) (Message, error)
+	// AddMessages records messages of conversations, in the order they are
+	// given. The slice is only the caller's for the length of the call, so an
+	// implementation that keeps the messages has to copy them.
+	AddMessages(ctx context.Context, messages []Message) error
 
 	// End records that a conversation finished at the given time, and reports
 	// whether this call is the one that ended it. A conversation that was
