@@ -16,6 +16,11 @@
 // here to tell a participant from a stranger; the reasoning is in
 // docs/adr/0010-split-the-conversation-tables-by-lifecycle-phase.md.
 //
+// A message reaches its room before it is recorded: messages are buffered and
+// written in batches, so that the database is not on the path a message takes
+// to the room. The reasoning is in
+// docs/adr/0012-buffer-message-writes-into-batched-inserts.md.
+//
 // Boundary: other modules must never import chat's persistence models.
 // Cross-module communication goes through the exported interfaces below.
 package chat
@@ -51,6 +56,13 @@ const (
 	// DefaultPingInterval is how often the server pings a connection to see
 	// whether it is still answering.
 	DefaultPingInterval = 30 * time.Second
+
+	// DefaultWriteBatch is how many messages are recorded in one write.
+	DefaultWriteBatch = 100
+
+	// DefaultWriteInterval is how long a message waits for a batch to fill
+	// before it is recorded with whatever else is buffered.
+	DefaultWriteInterval = 200 * time.Millisecond
 
 	// maxMessageRunes caps the body of one message. Counting runes keeps the
 	// limit the same whatever script the message is written in.
@@ -135,12 +147,17 @@ type Conversation struct {
 	Participants []string
 }
 
-// Message is one message of a conversation.
+// Message is one message of a conversation, as it is recorded.
 type Message struct {
-	ID          int64
-	SenderToken string
-	Body        string
-	CreatedAt   time.Time
+	ConversationID string
+	SenderToken    string
+	Body           string
+	// Flag is the value of messages.moderation_flag the message was judged
+	// with.
+	Flag int
+	// CreatedAt is when the server took the message. It is both what the room
+	// was told and what the message is recorded with.
+	CreatedAt time.Time
 }
 
 // Admission is the place a participant holds in the conversation they may
@@ -161,6 +178,7 @@ type Service struct {
 	store     Store
 	moderator Moderator
 	hub       *hub
+	writer    *messageWriter
 
 	presenceInterval time.Duration
 	presenceTTL      time.Duration
@@ -180,10 +198,15 @@ type Options struct {
 	RejoinGrace time.Duration
 	// PingInterval defaults to DefaultPingInterval.
 	PingInterval time.Duration
+	// WriteBatch defaults to DefaultWriteBatch.
+	WriteBatch int
+	// WriteInterval defaults to DefaultWriteInterval.
+	WriteInterval time.Duration
 }
 
 // NewService builds a Service. A nil moderator delivers every message as it
-// was written.
+// was written. The messages the service takes are recorded by a writer of its
+// own, which Close stops.
 func NewService(repo Repository, store Store, moderator Moderator, opts Options) *Service {
 	if opts.PresenceInterval <= 0 {
 		opts.PresenceInterval = DefaultPresenceInterval
@@ -197,18 +220,32 @@ func NewService(repo Repository, store Store, moderator Moderator, opts Options)
 	if opts.PingInterval <= 0 {
 		opts.PingInterval = DefaultPingInterval
 	}
+	if opts.WriteBatch <= 0 {
+		opts.WriteBatch = DefaultWriteBatch
+	}
+	if opts.WriteInterval <= 0 {
+		opts.WriteInterval = DefaultWriteInterval
+	}
 
 	return &Service{
 		repo:             repo,
 		store:            store,
 		moderator:        moderator,
 		hub:              newHub(store),
+		writer:           newMessageWriter(repo, opts.WriteBatch, opts.WriteInterval),
 		presenceInterval: opts.PresenceInterval,
 		presenceTTL:      opts.PresenceTTL,
 		rejoinGrace:      opts.RejoinGrace,
 		pingInterval:     opts.PingInterval,
 		now:              time.Now,
 	}
+}
+
+// Close stops recording messages once the ones already taken are written. A
+// service that was closed answers a message with an error instead of taking
+// it, so that nothing is delivered that will not be recorded.
+func (s *Service) Close(ctx context.Context) error {
+	return s.writer.close(ctx)
 }
 
 // Admit reports the place token holds in the conversation, and refuses anyone
@@ -366,8 +403,16 @@ func (s *Service) sendMessage(ctx context.Context, c *conn, body string) {
 		flag = moderationFlagNG
 	}
 
-	msg, err := s.repo.AddMessage(ctx, c.conversationID, c.token, body, flag)
-	if err != nil {
+	// The message is taken for recording before the room reads it, so that a
+	// message the server cannot keep is not delivered either.
+	msg := Message{
+		ConversationID: c.conversationID,
+		SenderToken:    c.token,
+		Body:           body,
+		Flag:           flag,
+		CreatedAt:      s.now().UTC(),
+	}
+	if err := s.writer.add(ctx, msg); err != nil {
 		slog.Error("record message",
 			slog.String("conversation_id", c.conversationID), slog.Any("error", err))
 		c.send(errorEvent(codeUnavailable, "the message could not be recorded"))
@@ -377,7 +422,6 @@ func (s *Service) sendMessage(ctx context.Context, c *conn, body string) {
 	sentAt := msg.CreatedAt
 	s.publish(ctx, c.conversationID, serverEvent{
 		Type:        eventMessage,
-		ID:          msg.ID,
 		Participant: c.participant,
 		Body:        msg.Body,
 		SentAt:      &sentAt,
