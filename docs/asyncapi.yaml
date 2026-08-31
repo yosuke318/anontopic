@@ -1,0 +1,281 @@
+asyncapi: 3.1.0
+
+info:
+  title: anontopic チャットルーム WebSocket
+  version: 0.1.0
+  description: |
+    ルーム内のリアルタイム通信。マッチングで成立した会話につないだ WebSocket 接続を、
+    サーバー側の視点で記述する（`send` はサーバーが送る、`receive` はサーバーが受け取る）。
+
+    接続の確立は HTTP のハンドシェイクで、その手順・認証・拒否される条件は
+    [openapi.yaml](openapi.yaml) の `/ws/rooms/{roomID}` に書いてある。この文書は
+    確立した後に流れるフレームだけを扱う。
+
+    利用者は会員登録を持たず、匿名のセッショントークンで識別する。トークンは他の参加者に
+    渡らず、部屋の中では会話ごとの参加者番号（1 起点）で表す。
+
+defaultContentType: application/json
+
+servers:
+  local:
+    host: localhost:8080
+    protocol: ws
+    description: ローカル（make up で起動する api サービス）
+
+channels:
+  room:
+    address: /ws/rooms/{roomID}
+    title: チャットルーム
+    description: |
+      1 つの会話につながる接続。参加者は別々のサーバーに接続しうるため、部屋のイベントは
+      サーバー間で Redis Pub/Sub を通って配られる。理由は
+      [ADR-0011](adr/0011-end-a-conversation-after-a-rejoin-grace.md) にある。
+    parameters:
+      roomID:
+        description: 接続先の会話 ID。`POST /api/matching` が返した UUID
+    messages:
+      clientMessage:
+        $ref: "#/components/messages/clientMessage"
+      joined:
+        $ref: "#/components/messages/joined"
+      participantJoined:
+        $ref: "#/components/messages/participantJoined"
+      participantLeft:
+        $ref: "#/components/messages/participantLeft"
+      message:
+        $ref: "#/components/messages/message"
+      ended:
+        $ref: "#/components/messages/ended"
+      error:
+        $ref: "#/components/messages/error"
+
+operations:
+  receiveClientMessage:
+    action: receive
+    channel:
+      $ref: "#/channels/room"
+    title: メッセージを受け取る
+    description: |
+      クライアントが送れるフレームはこれだけ。本文は前後の空白を落としてから扱い、
+      空になるもの（`empty_body`）と 2000 文字を超えるもの（`too_long`）は拒否する。
+
+      受け取った本文はモデレーションにかけ、ブロックされたものは誰にも配らず送信者に
+      `blocked` を返す。配るものは保存のために受け付けてから部屋に流す。
+    messages:
+      - $ref: "#/channels/room/messages/clientMessage"
+
+  sendRoomEvent:
+    action: send
+    channel:
+      $ref: "#/channels/room"
+    title: 部屋のイベントを送る
+    description: |
+      サーバーから届くイベント。`error` だけは送信者にしか届かず、それ以外は部屋の
+      全員に同じものが届く（発言者にも自分の発言が届く）。
+
+      サーバーは 30 秒ごとに ping を送るため、ブラウザ以外のクライアントは pong を
+      返す必要がある。
+    messages:
+      - $ref: "#/channels/room/messages/joined"
+      - $ref: "#/channels/room/messages/participantJoined"
+      - $ref: "#/channels/room/messages/participantLeft"
+      - $ref: "#/channels/room/messages/message"
+      - $ref: "#/channels/room/messages/ended"
+      - $ref: "#/channels/room/messages/error"
+
+components:
+  messages:
+    clientMessage:
+      name: message
+      title: メッセージの送信
+      contentType: application/json
+      payload:
+        type: object
+        required: [type, body]
+        properties:
+          type:
+            type: string
+            const: message
+          body:
+            type: string
+            description: 本文。前後の空白を落とした長さが 1〜2000 文字
+            minLength: 1
+            maxLength: 2000
+            examples:
+              - はじめまして
+
+    joined:
+      name: joined
+      title: 入室の挨拶
+      description: 接続した本人にだけ届く最初のイベント。
+      contentType: application/json
+      payload:
+        type: object
+        required: [type, conversation, participant, present]
+        properties:
+          type:
+            type: string
+            const: joined
+          conversation:
+            $ref: "#/components/schemas/conversation"
+          participant:
+            $ref: "#/components/schemas/participant"
+          present:
+            $ref: "#/components/schemas/present"
+
+    participantJoined:
+      name: participant_joined
+      title: 誰かが入室した
+      description: 自分の入室も届く。部屋には全員に同じものが流れる。
+      contentType: application/json
+      payload:
+        type: object
+        required: [type, participant, present]
+        properties:
+          type:
+            type: string
+            const: participant_joined
+          participant:
+            $ref: "#/components/schemas/participant"
+          present:
+            $ref: "#/components/schemas/present"
+
+    participantLeft:
+      name: participant_left
+      title: 誰かが退出した
+      description: |
+        切断は退出として即座に届く。会話が終わるのはここからさらに
+        `CHAT_REJOIN_GRACE` を過ぎてからで、猶予の間は同じ会話に再接続できる。
+      contentType: application/json
+      payload:
+        type: object
+        required: [type, participant, present]
+        properties:
+          type:
+            type: string
+            const: participant_left
+          participant:
+            $ref: "#/components/schemas/participant"
+          present:
+            $ref: "#/components/schemas/present"
+
+    message:
+      name: message
+      title: メッセージ
+      description: |
+        部屋に流れた 1 通。送信者にも同じものが届くため、全員が同じ順序で部屋を読む。
+
+        メッセージは配信された後にまとめて保存されるので、このイベントは保存された行を
+        指す ID を持たない。`sent_at` はサーバーが受け付けた時刻で、保存される時刻と
+        同じものになる。理由は
+        [ADR-0012](adr/0012-buffer-message-writes-into-batched-inserts.md) にある。
+      contentType: application/json
+      payload:
+        type: object
+        required: [type, participant, body, sent_at]
+        properties:
+          type:
+            type: string
+            const: message
+          participant:
+            $ref: "#/components/schemas/participant"
+          body:
+            type: string
+            examples:
+              - はじめまして
+          sent_at:
+            type: string
+            format: date-time
+            examples:
+              - "2026-08-29T00:49:31.380610756Z"
+
+    ended:
+      name: ended
+      title: 会話の終了
+      description: |
+        会話の最後のイベント。これを送った後、サーバーが接続を閉じる。
+
+        接続中の参加者が 1 人以下のまま `CHAT_REJOIN_GRACE`（既定 30 秒）を過ぎると
+        会話は終わる。理由は
+        [ADR-0011](adr/0011-end-a-conversation-after-a-rejoin-grace.md) にある。
+      contentType: application/json
+      payload:
+        type: object
+        required: [type, reason]
+        properties:
+          type:
+            type: string
+            const: ended
+          reason:
+            type: string
+            description: |
+              `conversations.end_reason` の値。参加者が居なくなった終了は `user_left`。
+            examples:
+              - user_left
+
+    error:
+      name: error
+      title: 受け付けられなかったフレームへの返答
+      description: 送信したクライアントにだけ届く。部屋には流れない。
+      contentType: application/json
+      payload:
+        type: object
+        required: [type, code, message]
+        properties:
+          type:
+            type: string
+            const: error
+          code:
+            type: string
+            enum:
+              - invalid_frame
+              - empty_body
+              - too_long
+              - blocked
+              - unavailable
+            description: |
+              `invalid_frame` は読めない JSON か知らない `type`、`empty_body` は空の本文、
+              `too_long` は 2000 文字超、`blocked` はモデレーションが配信を止めたもの、
+              `unavailable` は部屋かメッセージの取り扱いに失敗したもの。
+          message:
+            type: string
+            description: 人が読むための説明。表示に使う前提の文言ではない
+            examples:
+              - the message was not delivered
+
+  schemas:
+    conversation:
+      type: object
+      description: 接続した会話。
+      required: [id, topic_id, room_type, started_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        topic_id:
+          type: integer
+        room_type:
+          type: integer
+          description: ルームの人数
+          enum: [2, 3]
+        started_at:
+          type: string
+          format: date-time
+
+    participant:
+      type: integer
+      description: |
+        イベントの対象になる参加者の番号。会話ごとに 1 起点で振られ、どのサーバーから
+        見ても同じ番号になる。セッショントークンは部屋に流れない。
+      minimum: 1
+      examples:
+        - 1
+
+    present:
+      type: array
+      description: 今その会話につながっている参加者の番号を昇順に並べたもの。
+      items:
+        type: integer
+        minimum: 1
+      examples:
+        - [1, 2]
