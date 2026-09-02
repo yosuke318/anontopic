@@ -84,6 +84,42 @@ func TestTheWriterKeepsRecordingAfterABatchItCouldNotWrite(t *testing.T) {
 	}
 }
 
+func TestEveryMessageTheWriterTookIsRecordedWhenItStops(t *testing.T) {
+	repo := newFakeRepository(tokenAlice, tokenBob)
+
+	// The interval outlasts the test, so the messages that are not written by
+	// a full batch are written by the close alone.
+	w := newMessageWriter(repo, 10, time.Hour)
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var taken int
+
+	// The senders run while the writer is stopping, which is the race a room
+	// still being spoken in during a shutdown puts it through.
+	for range 50 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			if err := w.add(context.Background(), testMessage(repo, "同時に送る")); err == nil {
+				mu.Lock()
+				taken++
+				mu.Unlock()
+			}
+		}()
+	}
+
+	closeWriter(t, w)
+	wg.Wait()
+
+	// A message the writer answered for is a message it wrote: a sender that
+	// was told nothing was wrong has already handed the message to its room.
+	if recorded := repo.recorded(); len(recorded) != taken {
+		t.Fatalf("recorded %d messages, want the %d the writer took", len(recorded), taken)
+	}
+}
+
 func TestAFullBufferMakesTheSenderWaitRatherThanLoseAMessage(t *testing.T) {
 	repo := newFakeRepository(tokenAlice, tokenBob)
 	held := &heldRepository{fakeRepository: repo, released: make(chan struct{})}
