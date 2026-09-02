@@ -45,17 +45,22 @@ func TestAMessageReachesAParticipantOnAnotherServer(t *testing.T) {
 
 	// The sender is served the message the same way, so that every
 	// participant reads the room in one order.
-	if own, _ := await(t, alice, eventMessage); own.Body != ev.Body || own.ID != ev.ID {
+	if own, _ := await(t, alice, eventMessage); own.Body != ev.Body || !own.SentAt.Equal(*ev.SentAt) {
 		t.Fatalf("the sender was served %+v, want %+v", own, ev)
 	}
 
-	recorded := repo.recorded()
+	recorded := awaitRecorded(t, repo, 1)
 	if len(recorded) != 1 {
 		t.Fatalf("recorded %d messages, want 1", len(recorded))
 	}
 	if recorded[0].senderToken != tokenAlice || recorded[0].flag != moderationFlagClean {
 		t.Fatalf("recorded %+v, want the message of %q with flag %d",
 			recorded[0], tokenAlice, moderationFlagClean)
+	}
+	// The room and the row hold the same time, so a report about what a
+	// participant read finds the message it was about.
+	if !recorded[0].createdAt.Equal(*ev.SentAt) {
+		t.Fatalf("recorded at %v, want the %v the room was told", recorded[0].createdAt, *ev.SentAt)
 	}
 }
 
@@ -204,7 +209,9 @@ func TestABlockedMessageIsAnsweredWithoutReachingTheRoom(t *testing.T) {
 		t.Fatalf("body = %q, want %q", ev.Body, "こんばんは")
 	}
 
-	recorded := repo.recorded()
+	// The blocked message was sent first, so it would have been recorded
+	// first: one message means it reached neither the room nor the database.
+	recorded := awaitRecorded(t, repo, 1)
 	if len(recorded) != 1 || recorded[0].body != "こんばんは" {
 		t.Fatalf("recorded %+v, want the message that was not blocked alone", recorded)
 	}
@@ -225,7 +232,7 @@ func TestAFlaggedMessageIsDeliveredAndRecordedWithItsFlag(t *testing.T) {
 	send(t, alice, clientFrame{Type: frameMessage, Body: "怪しい話"})
 	await(t, alice, eventMessage)
 
-	recorded := repo.recorded()
+	recorded := awaitRecorded(t, repo, 1)
 	if len(recorded) != 1 || recorded[0].flag != moderationFlagNG {
 		t.Fatalf("recorded %+v, want one message with flag %d", recorded, moderationFlagNG)
 	}
@@ -258,8 +265,13 @@ func TestAFrameTheRoomCannotReadIsAnswered(t *testing.T) {
 		})
 	}
 
-	if recorded := repo.recorded(); len(recorded) != 0 {
-		t.Fatalf("recorded %+v, want nothing", recorded)
+	// A message that the room does take is recorded after the refused frames
+	// would have been, so it arriving alone means none of them was recorded.
+	send(t, alice, clientFrame{Type: frameMessage, Body: "こんにちは"})
+	await(t, alice, eventMessage)
+
+	if recorded := awaitRecorded(t, repo, 1); len(recorded) != 1 || recorded[0].body != "こんにちは" {
+		t.Fatalf("recorded %+v, want the message the room took alone", recorded)
 	}
 }
 

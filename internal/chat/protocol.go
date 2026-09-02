@@ -51,8 +51,7 @@ type serverEvent struct {
 	// Present holds the participants connected to the room. It is set on
 	// eventJoined, eventParticipantJoined and eventParticipantLeft.
 	Present []int `json:"present,omitempty"`
-	// ID, Body and SentAt are set on eventMessage.
-	ID     int64      `json:"id,omitempty"`
+	// Body and SentAt are set on eventMessage.
 	Body   string     `json:"body,omitempty"`
 	SentAt *time.Time `json:"sent_at,omitempty"`
 	// Reason is set on eventEnded and holds a value of

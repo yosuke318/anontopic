@@ -190,6 +190,7 @@ type recordedMessage struct {
 	senderToken string
 	body        string
 	flag        int
+	createdAt   time.Time
 }
 
 func newFakeRepository(participants ...string) *fakeRepository {
@@ -219,18 +220,20 @@ func (r *fakeRepository) Conversation(_ context.Context, id string) (Conversatio
 	return conv, nil
 }
 
-func (r *fakeRepository) AddMessage(_ context.Context, _, senderToken, body string, flag int) (Message, error) {
+func (r *fakeRepository) AddMessages(_ context.Context, messages []Message) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	r.messages = append(r.messages, recordedMessage{senderToken: senderToken, body: body, flag: flag})
+	for _, msg := range messages {
+		r.messages = append(r.messages, recordedMessage{
+			senderToken: msg.SenderToken,
+			body:        msg.Body,
+			flag:        msg.Flag,
+			createdAt:   msg.CreatedAt,
+		})
+	}
 
-	return Message{
-		ID:          int64(len(r.messages)),
-		SenderToken: senderToken,
-		Body:        body,
-		CreatedAt:   time.Now().UTC(),
-	}, nil
+	return nil
 }
 
 func (r *fakeRepository) End(_ context.Context, _, reason string, at time.Time) (bool, error) {
@@ -252,6 +255,26 @@ func (r *fakeRepository) recorded() []recordedMessage {
 	defer r.mu.Unlock()
 
 	return slices.Clone(r.messages)
+}
+
+// awaitRecorded reads what the repository holds once it holds want messages.
+// The writer records them after the room has read them, so a test that
+// watched a message arrive still has to wait for it to be written.
+func awaitRecorded(t *testing.T, repo *fakeRepository, want int) []recordedMessage {
+	t.Helper()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		recorded := repo.recorded()
+		if len(recorded) >= want {
+			return recorded
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("recorded %d messages, want %d", len(recorded), want)
+		}
+
+		time.Sleep(time.Millisecond)
+	}
 }
 
 func (r *fakeRepository) ending() (time.Time, string) {
@@ -277,6 +300,9 @@ func testOptions() Options {
 		// only the tests about the end of a conversation shorten it.
 		RejoinGrace:  3 * time.Second,
 		PingInterval: time.Second,
+		// Messages are written one batch behind the room, and a test reads
+		// them right after they arrive.
+		WriteInterval: time.Millisecond,
 	}
 }
 
@@ -285,8 +311,18 @@ func testOptions() Options {
 func newTestServer(t *testing.T, repo Repository, store Store, moderator Moderator, opts Options, tokens ...string) *httptest.Server {
 	t.Helper()
 
+	svc := NewService(repo, store, moderator, opts)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+
+		if err := svc.Close(ctx); err != nil {
+			t.Errorf("close the service: %v", err)
+		}
+	})
+
 	mux := http.NewServeMux()
-	NewHandler(NewService(repo, store, moderator, opts), &stubAuthenticator{tokens: tokens}, nil).Register(mux)
+	NewHandler(svc, &stubAuthenticator{tokens: tokens}, nil).Register(mux)
 
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)

@@ -135,27 +135,75 @@ func TestPostgresRepositoryReportsAConversationItCannotRead(t *testing.T) {
 	}
 }
 
-func TestPostgresRepositoryStoresAMessageWithItsFlag(t *testing.T) {
+func TestPostgresRepositoryStoresMessagesInThePartitionOfTheirTime(t *testing.T) {
 	repo := postgresTestRepository(t)
 	id := testConversation(t, repo, "first-token", "second-token")
 
-	msg, err := repo.AddMessage(t.Context(), id, "first-token", "こんにちは", moderationFlagNG)
-	if err != nil {
-		t.Fatalf("AddMessage: %v", err)
-	}
-	if msg.ID == 0 || msg.CreatedAt.IsZero() {
-		t.Fatalf("stored %+v, want a message with the id and time the database gave it", msg)
+	// PostgreSQL keeps a timestamp to the microsecond, so a time the test can
+	// compare with what it reads back is rounded to one.
+	sentAt := time.Now().UTC().Truncate(time.Microsecond)
+	messages := []Message{
+		{
+			ConversationID: id,
+			SenderToken:    "first-token",
+			Body:           "こんにちは",
+			Flag:           moderationFlagClean,
+			CreatedAt:      sentAt,
+		},
+		{
+			ConversationID: id,
+			SenderToken:    "second-token",
+			Body:           "会いませんか",
+			Flag:           moderationFlagNG,
+			CreatedAt:      sentAt.Add(time.Millisecond),
+		},
 	}
 
-	var body string
-	var flag int
-	if err := repo.pool.QueryRow(t.Context(),
-		"SELECT body, moderation_flag FROM messages WHERE id = $1 AND created_at = $2",
-		msg.ID, msg.CreatedAt).Scan(&body, &flag); err != nil {
-		t.Fatalf("read the message back: %v", err)
+	if err := repo.AddMessages(t.Context(), messages); err != nil {
+		t.Fatalf("AddMessages: %v", err)
 	}
-	if body != "こんにちは" || flag != moderationFlagNG {
-		t.Fatalf("read back %q with flag %d, want %q with flag %d", body, flag, "こんにちは", moderationFlagNG)
+
+	rows, err := repo.pool.Query(t.Context(),
+		"SELECT sender_token, body, moderation_flag, created_at, tableoid::regclass::text "+
+			"FROM messages WHERE conversation_id = $1 ORDER BY created_at", id)
+	if err != nil {
+		t.Fatalf("read the messages back: %v", err)
+	}
+	defer rows.Close()
+
+	// The month of the message decides its partition, and the partitions of
+	// the months around this one are created by the migration.
+	partition := "messages_" + sentAt.Format("200601")
+
+	var read int
+	for rows.Next() {
+		var senderToken, body, table string
+		var flag int
+		var createdAt time.Time
+		if err := rows.Scan(&senderToken, &body, &flag, &createdAt, &table); err != nil {
+			t.Fatalf("read a message back: %v", err)
+		}
+
+		want := messages[read]
+		if senderToken != want.SenderToken || body != want.Body || flag != want.Flag {
+			t.Fatalf("read back %q of %q with flag %d, want %q of %q with flag %d",
+				body, senderToken, flag, want.Body, want.SenderToken, want.Flag)
+		}
+		if !createdAt.UTC().Equal(want.CreatedAt) {
+			t.Fatalf("recorded at %v, want the %v the message was taken at",
+				createdAt.UTC(), want.CreatedAt)
+		}
+		if table != partition {
+			t.Fatalf("the message is in %s, want %s", table, partition)
+		}
+
+		read++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read the messages back: %v", err)
+	}
+	if read != len(messages) {
+		t.Fatalf("read back %d messages, want %d", read, len(messages))
 	}
 }
 
