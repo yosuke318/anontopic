@@ -35,7 +35,12 @@ type messageWriter struct {
 	queue   chan Message
 	closing chan struct{}
 	stopped chan struct{}
-	once    sync.Once
+
+	// mu is held for reading by every sender and exclusively by close, so
+	// that closing cannot fall between a sender finding the writer open and
+	// buffering its message.
+	mu     sync.RWMutex
+	closed bool
 }
 
 // newMessageWriter starts a writer that records up to batch messages at a
@@ -55,31 +60,43 @@ func newMessageWriter(repo Repository, batch int, interval time.Duration) *messa
 	return w
 }
 
-// add buffers one message. A buffer that is full makes the sender wait for
-// room rather than dropping what it holds, because a conversation is kept for
-// the reports and disclosure requests made about it.
+// add buffers one message, and refuses every message once the writer is
+// stopping: a message the writer takes is one it will write. A buffer that is
+// full makes the sender wait for room rather than dropping what it holds,
+// because a conversation is kept for the reports and disclosure requests made
+// about it.
 func (w *messageWriter) add(ctx context.Context, msg Message) error {
-	// A writer that is stopping refuses every message, buffer or no buffer.
-	select {
-	case <-w.closing:
+	// Holding the lock while waiting for room keeps close from stopping the
+	// writer under a sender. Senders share it, and the run loop is still
+	// draining the buffer, so the wait ends whatever else is going on.
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	if w.closed {
 		return errWriterClosed
-	default:
 	}
 
 	select {
 	case w.queue <- msg:
 		return nil
-	case <-w.closing:
-		return errWriterClosed
 	case <-ctx.Done():
 		return ctx.Err()
 	}
 }
 
-// close stops the writer once what it holds is written, and gives up on a
-// write that outlasts ctx.
+// close stops the writer once what it holds is written, and stops waiting for
+// it when ctx is over. The batch being written is left to its own timeout,
+// because giving up on it in the middle would lose the messages it holds.
 func (w *messageWriter) close(ctx context.Context) error {
-	w.once.Do(func() { close(w.closing) })
+	// Taking the lock exclusively waits for the senders on their way in, so
+	// that the buffer takes nothing more once the writer is told to stop and
+	// the run loop can empty it for good.
+	w.mu.Lock()
+	if !w.closed {
+		w.closed = true
+		close(w.closing)
+	}
+	w.mu.Unlock()
 
 	select {
 	case <-w.stopped:
@@ -114,8 +131,8 @@ func (w *messageWriter) run() {
 	}
 }
 
-// drain takes everything the buffer holds, so that nothing waits behind a
-// writer that is stopping.
+// drain takes everything the buffer holds. Nothing is buffered after the
+// writer is told to stop, so emptying it once empties it for good.
 func (w *messageWriter) drain(pending []Message) []Message {
 	for {
 		select {
