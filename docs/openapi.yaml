@@ -256,18 +256,23 @@ paths:
         接続後はテキストフレームで JSON をやり取りする。クライアントが送るのは
         メッセージのみで、サーバーからは以下の `type` が届く。サーバーは 30 秒ごとに
         ping を送るため、ブラウザ以外のクライアントは pong を返す必要がある。
+        各フレームのスキーマは [asyncapi.yaml](asyncapi.yaml) にある。
 
         | `type` | 内容 |
         | --- | --- |
         | `joined` | 接続した本人への挨拶。`conversation` / `participant`（自分の番号）/ `present`（接続中の参加者の番号）が入る |
         | `participant_joined` | 誰かが入室した。自分の入室も届く |
         | `participant_left` | 誰かが退出した |
-        | `message` | メッセージ。`id` / `participant`（送信者の番号）/ `body` / `sent_at` が入る。送信者にも同じものが届く |
+        | `message` | メッセージ。`participant`（送信者の番号）/ `body` / `sent_at` が入る。送信者にも同じものが届く |
         | `ended` | 会話が終了した。`reason` は `conversations.end_reason` の値。これを最後にサーバーが接続を閉じる |
         | `error` | 送信者だけに返る。`code` は `invalid_frame` / `empty_body` / `too_long` / `blocked` / `unavailable` |
 
         参加者は会話ごとの番号（1 起点）で表す。セッショントークンは他の参加者に渡らない。
         本文が 2000 文字を超えるメッセージは `too_long` で拒否する。
+
+        メッセージは配信された後にまとめて保存される。`sent_at` はサーバーが受け付けた
+        時刻で、保存される時刻と同じものになる。理由は
+        [ADR-0012](adr/0012-buffer-message-writes-into-batched-inserts.md) にある。
 
         接続中の参加者が 1 人以下のまま `CHAT_REJOIN_GRACE` を過ぎると、会話は
         `user_left` で終了する。切断してから猶予の間は同じ会話に再接続でき、
