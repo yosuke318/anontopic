@@ -199,7 +199,8 @@ paths:
           description: マッチングを要求するレートを超えた
           headers:
             Retry-After:
-              description: 次に要求してよいまでの秒数
+              description: |
+                次に要求してよいまでの秒数。`CAPACITY_MATCH_INTERVAL` を切り上げた値になる
               schema:
                 type: integer
                 examples:

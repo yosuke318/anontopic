@@ -134,18 +134,9 @@ func (s *fakeStore) calls() []takeCall {
 	return append([]takeCall(nil), s.taken...)
 }
 
-// testService builds a service whose leases are never renewed on their own,
-// so that a test controls what is counted.
-func testService(store Store, opts Options) *Service {
-	if opts.RenewInterval <= 0 {
-		opts.RenewInterval = time.Hour
-	}
-	return NewService(store, opts)
-}
-
 func TestAcquireRefusesTheConnectionThatWouldPassTheLimit(t *testing.T) {
 	store := newFakeStore()
-	svc := testService(store, Options{Connections: 2, PerIPHash: 2})
+	svc := NewService(store, Options{Connections: 2, PerIPHash: 2})
 
 	for i := range 2 {
 		if _, err := svc.Acquire(t.Context(), "hash-of-a-network"); err != nil {
@@ -171,7 +162,7 @@ func TestAcquireRefusesTheConnectionThatWouldPassTheLimit(t *testing.T) {
 
 func TestAcquireRefusesAnAddressHoldingItsShare(t *testing.T) {
 	store := newFakeStore()
-	svc := testService(store, Options{Connections: 10, PerIPHash: 2})
+	svc := NewService(store, Options{Connections: 10, PerIPHash: 2})
 
 	for i := range 2 {
 		if _, err := svc.Acquire(t.Context(), "one-network"); err != nil {
@@ -220,7 +211,7 @@ func TestARefusalSaysWhichLimitWasReached(t *testing.T) {
 
 func TestReleasingAConnectionMakesRoomForTheNextOne(t *testing.T) {
 	store := newFakeStore()
-	svc := testService(store, Options{Connections: 1, PerIPHash: 1})
+	svc := NewService(store, Options{Connections: 1, PerIPHash: 1})
 
 	release, err := svc.Acquire(t.Context(), "one-network")
 	if err != nil {
@@ -244,7 +235,7 @@ func TestReleasingAConnectionMakesRoomForTheNextOne(t *testing.T) {
 // nothing renews them, which is what keeps the count from creeping up.
 func TestAConnectionThatIsNotRenewedStopsBeingCounted(t *testing.T) {
 	store := newFakeStore()
-	svc := testService(store, Options{Connections: 1, PerIPHash: 1, LeaseTTL: 30 * time.Second})
+	svc := NewService(store, Options{Connections: 1, PerIPHash: 1, LeaseTTL: 30 * time.Second})
 
 	start := time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)
 	svc.now = func() time.Time { return start }
@@ -302,7 +293,7 @@ func TestTheRatesAreAskedForUnderTheirOwnLimits(t *testing.T) {
 	if _, err := svc.AllowMessage(t.Context(), "a-session-token"); err != nil {
 		t.Fatalf("AllowMessage: %v", err)
 	}
-	if _, err := svc.AllowMatch(t.Context(), "hash-of-a-network"); err != nil {
+	if _, _, err := svc.AllowMatch(t.Context(), "hash-of-a-network"); err != nil {
 		t.Fatalf("AllowMatch: %v", err)
 	}
 
@@ -326,5 +317,78 @@ func TestASpentRateIsReported(t *testing.T) {
 	}
 	if allowed {
 		t.Fatal("the message was allowed, want it held back")
+	}
+}
+
+// A renew interval that does not fit under the lease would let an open
+// connection drop out of the count between two renewals, and the cap would be
+// read against fewer connections than are held.
+func TestARenewIntervalThatDoesNotFitUnderTheLeaseIsShortened(t *testing.T) {
+	cases := map[string]struct {
+		leaseTTL time.Duration
+		renew    time.Duration
+		want     time.Duration
+	}{
+		"an interval longer than the lease": {
+			leaseTTL: 30 * time.Second,
+			renew:    time.Minute,
+			want:     10 * time.Second,
+		},
+		"an interval that leaves room for one renewal": {
+			leaseTTL: 30 * time.Second,
+			renew:    20 * time.Second,
+			want:     10 * time.Second,
+		},
+		"an interval that fits is kept": {
+			leaseTTL: 30 * time.Second,
+			renew:    2 * time.Second,
+			want:     2 * time.Second,
+		},
+		"the default fits under the default lease": {
+			leaseTTL: DefaultLeaseTTL,
+			renew:    DefaultRenewInterval,
+			want:     DefaultRenewInterval,
+		},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			svc := NewService(newFakeStore(), Options{LeaseTTL: c.leaseTTL, RenewInterval: c.renew})
+			if svc.renewInterval != c.want {
+				t.Fatalf("renew interval = %v, want %v", svc.renewInterval, c.want)
+			}
+		})
+	}
+}
+
+// A lease so short that a third of it rounds to nothing still has to leave an
+// interval a ticker can run on.
+func TestTheRenewIntervalStaysAboveZero(t *testing.T) {
+	svc := NewService(newFakeStore(), Options{LeaseTTL: time.Nanosecond, RenewInterval: time.Second})
+	if svc.renewInterval <= 0 {
+		t.Fatalf("renew interval = %v, want a positive interval", svc.renewInterval)
+	}
+}
+
+func TestARefusedMatchNamesTheWaitBeforeTheNextTry(t *testing.T) {
+	store := newFakeStore()
+	svc := NewService(store, Options{Match: Limit{Burst: 1, Interval: 25 * time.Second}})
+
+	allowed, wait, err := svc.AllowMatch(t.Context(), "hash-of-a-network")
+	if err != nil {
+		t.Fatalf("AllowMatch: %v", err)
+	}
+	if !allowed || wait != 0 {
+		t.Fatalf("allowed = %v with a wait of %v, want it allowed with no wait", allowed, wait)
+	}
+
+	store.allow = false
+	allowed, wait, err = svc.AllowMatch(t.Context(), "hash-of-a-network")
+	if err != nil {
+		t.Fatalf("AllowMatch: %v", err)
+	}
+	// The wait is the configured interval, so a deployment that changes the
+	// rate changes what its clients are told.
+	if allowed || wait != 25*time.Second {
+		t.Fatalf("allowed = %v with a wait of %v, want it held back for 25s", allowed, wait)
 	}
 }
