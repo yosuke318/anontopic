@@ -124,9 +124,35 @@ const (
 )
 
 // SessionAuthenticator resolves the session a request carries and returns the
-// token identifying the participant.
+// token identifying the participant, plus the hashed address the session was
+// issued to.
 type SessionAuthenticator interface {
 	Authenticate(r *http.Request) (string, error)
+	IPHash(r *http.Request) string
+}
+
+// ConnectionLimiter counts one connection against the limits the service
+// holds connections under. The function it returns gives the place back and
+// has to be called once the connection is closed. A limit that left no room
+// is reported as an error a Refusal can be read out of.
+type ConnectionLimiter interface {
+	Acquire(ctx context.Context, ipHash string) (func(), error)
+}
+
+// Refusal is what a ConnectionLimiter says about a connection it did not
+// count. The handler reads it out of the error with errors.As.
+type Refusal interface {
+	error
+
+	// AtCapacity reports whether the limit that was reached is the number of
+	// connections the service holds, rather than the number one hashed
+	// address may hold.
+	AtCapacity() bool
+}
+
+// MessageLimiter reports whether a participant may send another message now.
+type MessageLimiter interface {
+	AllowMessage(ctx context.Context, subject string) (bool, error)
 }
 
 // Moderator judges the body of a message before the room sees it.
@@ -177,6 +203,7 @@ type Service struct {
 	repo      Repository
 	store     Store
 	moderator Moderator
+	messages  MessageLimiter
 	hub       *hub
 	writer    *messageWriter
 
@@ -205,9 +232,10 @@ type Options struct {
 }
 
 // NewService builds a Service. A nil moderator delivers every message as it
-// was written. The messages the service takes are recorded by a writer of its
-// own, which Close stops.
-func NewService(repo Repository, store Store, moderator Moderator, opts Options) *Service {
+// was written, and a nil messages limiter takes them however fast they are
+// sent. The messages the service takes are recorded by a writer of its own,
+// which Close stops.
+func NewService(repo Repository, store Store, moderator Moderator, messages MessageLimiter, opts Options) *Service {
 	if opts.PresenceInterval <= 0 {
 		opts.PresenceInterval = DefaultPresenceInterval
 	}
@@ -231,6 +259,7 @@ func NewService(repo Repository, store Store, moderator Moderator, opts Options)
 		repo:             repo,
 		store:            store,
 		moderator:        moderator,
+		messages:         messages,
 		hub:              newHub(store),
 		writer:           newMessageWriter(repo, opts.WriteBatch, opts.WriteInterval),
 		presenceInterval: opts.PresenceInterval,
@@ -376,6 +405,18 @@ func (s *Service) handleFrame(ctx context.Context, c *conn, data []byte) {
 // sendMessage moderates one message, records it, and hands it to the room,
 // its sender included.
 func (s *Service) sendMessage(ctx context.Context, c *conn, body string) {
+	allowed, err := s.allowMessage(ctx, c.token)
+	if err != nil {
+		slog.Error("read the sending rate",
+			slog.String("conversation_id", c.conversationID), slog.Any("error", err))
+		c.send(errorEvent(codeUnavailable, "the message could not be taken"))
+		return
+	}
+	if !allowed {
+		c.send(errorEvent(codeRateLimited, "messages are being sent too quickly"))
+		return
+	}
+
 	body = strings.TrimSpace(body)
 	switch {
 	case body == "":
@@ -426,6 +467,15 @@ func (s *Service) sendMessage(ctx context.Context, c *conn, body string) {
 		Body:        msg.Body,
 		SentAt:      &sentAt,
 	})
+}
+
+// allowMessage asks the limiter whether the sender is within their rate.
+// Without one, a message is taken however fast it was sent.
+func (s *Service) allowMessage(ctx context.Context, token string) (bool, error) {
+	if s.messages == nil {
+		return true, nil
+	}
+	return s.messages.AllowMessage(ctx, token)
 }
 
 // moderate asks the moderator about a body. Without one, every message is

@@ -19,8 +19,8 @@ func TestAMessageReachesAParticipantOnAnotherServer(t *testing.T) {
 
 	// Two servers of one deployment: they share the store and the database,
 	// and each holds one of the two connections.
-	first := newTestServer(t, repo, store, nil, testOptions(), tokenAlice)
-	second := newTestServer(t, repo, store, nil, testOptions(), tokenBob)
+	first := newTestServer(t, repo, store, nil, nil, testOptions(), tokenAlice)
+	second := newTestServer(t, repo, store, nil, nil, testOptions(), tokenBob)
 
 	alice := dial(t, first, repo.conv.ID, tokenAlice)
 	bob := dial(t, second, repo.conv.ID, tokenBob)
@@ -67,7 +67,7 @@ func TestAMessageReachesAParticipantOnAnotherServer(t *testing.T) {
 func TestAParticipantIsAnnouncedToTheRoom(t *testing.T) {
 	repo := newFakeRepository(tokenAlice, tokenBob)
 	store := newFakeStore()
-	srv := newTestServer(t, repo, store, nil, testOptions(), tokenAlice, tokenBob)
+	srv := newTestServer(t, repo, store, nil, nil, testOptions(), tokenAlice, tokenBob)
 
 	alice := dial(t, srv, repo.conv.ID, tokenAlice)
 	if ev, _ := await(t, alice, eventJoined); ev.Participant != 1 || len(ev.Present) != 1 {
@@ -97,7 +97,7 @@ func TestTheRoomIsToldWhenAParticipantLeavesAndTheConversationEnds(t *testing.T)
 
 	opts := testOptions()
 	opts.RejoinGrace = 20 * time.Millisecond
-	srv := newTestServer(t, repo, store, nil, opts, tokenAlice, tokenBob)
+	srv := newTestServer(t, repo, store, nil, nil, opts, tokenAlice, tokenBob)
 
 	alice := dial(t, srv, repo.conv.ID, tokenAlice)
 	bob := dial(t, srv, repo.conv.ID, tokenBob)
@@ -126,7 +126,7 @@ func TestTheRoomIsToldWhenAParticipantLeavesAndTheConversationEnds(t *testing.T)
 func TestAConversationNobodyIsConnectedToEndsAtOnce(t *testing.T) {
 	repo := newFakeRepository(tokenAlice, tokenBob)
 	store := newFakeStore()
-	srv := newTestServer(t, repo, store, nil, testOptions(), tokenAlice)
+	srv := newTestServer(t, repo, store, nil, nil, testOptions(), tokenAlice)
 
 	alice := dial(t, srv, repo.conv.ID, tokenAlice)
 	await(t, alice, eventJoined)
@@ -154,7 +154,7 @@ func TestConnectingAgainKeepsOneParticipant(t *testing.T) {
 	repo := newFakeRepository(tokenAlice, tokenBob)
 	store := newFakeStore()
 
-	srv := newTestServer(t, repo, store, nil, testOptions(), tokenAlice, tokenBob)
+	srv := newTestServer(t, repo, store, nil, nil, testOptions(), tokenAlice, tokenBob)
 
 	alice := dial(t, srv, repo.conv.ID, tokenAlice)
 	bob := dial(t, srv, repo.conv.ID, tokenBob)
@@ -189,7 +189,7 @@ func TestABlockedMessageIsAnsweredWithoutReachingTheRoom(t *testing.T) {
 		}
 		return DecisionAllow, nil
 	})
-	srv := newTestServer(t, repo, store, moderator, testOptions(), tokenAlice, tokenBob)
+	srv := newTestServer(t, repo, store, moderator, nil, testOptions(), tokenAlice, tokenBob)
 
 	alice := dial(t, srv, repo.conv.ID, tokenAlice)
 	bob := dial(t, srv, repo.conv.ID, tokenBob)
@@ -224,7 +224,7 @@ func TestAFlaggedMessageIsDeliveredAndRecordedWithItsFlag(t *testing.T) {
 	moderator := moderatorFunc(func(_ context.Context, _ string) (Decision, error) {
 		return DecisionFlag, nil
 	})
-	srv := newTestServer(t, repo, store, moderator, testOptions(), tokenAlice)
+	srv := newTestServer(t, repo, store, moderator, nil, testOptions(), tokenAlice)
 
 	alice := dial(t, srv, repo.conv.ID, tokenAlice)
 	await(t, alice, eventJoined)
@@ -241,7 +241,7 @@ func TestAFlaggedMessageIsDeliveredAndRecordedWithItsFlag(t *testing.T) {
 func TestAFrameTheRoomCannotReadIsAnswered(t *testing.T) {
 	repo := newFakeRepository(tokenAlice, tokenBob)
 	store := newFakeStore()
-	srv := newTestServer(t, repo, store, nil, testOptions(), tokenAlice)
+	srv := newTestServer(t, repo, store, nil, nil, testOptions(), tokenAlice)
 
 	alice := dial(t, srv, repo.conv.ID, tokenAlice)
 	await(t, alice, eventJoined)
@@ -277,7 +277,7 @@ func TestAFrameTheRoomCannotReadIsAnswered(t *testing.T) {
 
 func TestAdmitRefusesAnyoneTheConversationWasNotFormedFor(t *testing.T) {
 	repo := newFakeRepository(tokenAlice, tokenBob)
-	svc := NewService(repo, newFakeStore(), nil, testOptions())
+	svc := NewService(repo, newFakeStore(), nil, nil, testOptions())
 
 	adm, err := svc.Admit(context.Background(), repo.conv.ID, tokenBob)
 	if err != nil {
@@ -326,5 +326,39 @@ func TestNumbersOfNamesParticipantsByTheirPlaceInTheConversation(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestAMessageOverTheRateIsHeldBack(t *testing.T) {
+	repo := newFakeRepository(tokenAlice, tokenBob)
+	store := newFakeStore()
+	messages := &stubMessageLimiter{allow: true}
+	srv := newTestServer(t, repo, store, nil, messages, testOptions(), tokenAlice)
+
+	alice := dial(t, srv, repo.conv.ID, tokenAlice)
+	await(t, alice, eventJoined)
+
+	send(t, alice, clientFrame{Type: frameMessage, Body: "こんにちは"})
+	await(t, alice, eventMessage)
+
+	messages.hold()
+	send(t, alice, clientFrame{Type: frameMessage, Body: "こんにちは"})
+
+	if ev, _ := await(t, alice, eventError); ev.Code != codeRateLimited {
+		t.Fatalf("code = %q, want %q", ev.Code, codeRateLimited)
+	}
+
+	// The message that was held back is not recorded either, so the one that
+	// went through is the only one written.
+	if recorded := awaitRecorded(t, repo, 1); len(recorded) != 1 {
+		t.Fatalf("recorded %+v, want the message that went through alone", recorded)
+	}
+
+	// The rate is counted per sender, so the session token is what it is
+	// asked about.
+	for _, subject := range messages.senders() {
+		if subject != tokenAlice {
+			t.Fatalf("subject = %q, want %q", subject, tokenAlice)
+		}
 	}
 }

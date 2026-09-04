@@ -210,6 +210,18 @@ func (t fakeTopics) IsActive(_ context.Context, id int) (bool, error) {
 	return slices.Contains(t.active, id), nil
 }
 
+// fakeRate holds back every request once allow is false, and records the
+// subjects it was asked about.
+type fakeRate struct {
+	allow    bool
+	subjects []string
+}
+
+func (r *fakeRate) AllowMatch(_ context.Context, subject string) (bool, error) {
+	r.subjects = append(r.subjects, subject)
+	return r.allow, nil
+}
+
 // fakeBans answers for a fixed set of banned hashes.
 type fakeBans struct {
 	banned []string
@@ -227,7 +239,7 @@ func (b fakeBans) IsBanned(_ context.Context, ipHash string) (bool, error) {
 func newTestService(t *testing.T, store Store, repo Repository) (*Service, *testClock) {
 	t.Helper()
 
-	svc := NewService(store, repo, fakeTopics{active: []int{1, 2}}, fakeBans{}, Options{})
+	svc := NewService(store, repo, fakeTopics{active: []int{1, 2}}, fakeBans{}, nil, Options{})
 	clock := &testClock{current: time.Unix(1_700_000_000, 0).UTC()}
 	svc.now = clock.Now
 
@@ -381,7 +393,7 @@ func TestJoinRefusesATopicThatIsNotOffered(t *testing.T) {
 func TestJoinKeepsABannedIdentifierOutOfTheQueue(t *testing.T) {
 	store := newFakeStore()
 	svc := NewService(store, newFakeRepository(), fakeTopics{active: []int{1}},
-		fakeBans{banned: []string{"banned-hash"}}, Options{})
+		fakeBans{banned: []string{"banned-hash"}}, nil, Options{})
 
 	_, err := svc.Join(context.Background(), "alice", "banned-hash", Queue{TopicID: 1, RoomType: 2})
 	if !errors.Is(err, ErrBanned) {
@@ -478,5 +490,37 @@ func TestAConversationThatCannotBeWrittenReturnsItsParticipants(t *testing.T) {
 		if state.Kind != StateIdle {
 			t.Fatalf("%s kind = %v, want %v", token, state.Kind, StateIdle)
 		}
+	}
+}
+
+func TestJoinHoldsBackAnAddressAskingTooOften(t *testing.T) {
+	store := newFakeStore()
+	rate := &fakeRate{allow: true}
+	svc := NewService(store, newFakeRepository(), fakeTopics{active: []int{1}}, fakeBans{}, rate, Options{})
+
+	if _, err := svc.Join(context.Background(), "alice", "one-network", Queue{TopicID: 1, RoomType: 2}); err != nil {
+		t.Fatalf("Join: %v", err)
+	}
+
+	rate.allow = false
+	_, err := svc.Join(context.Background(), "bob", "one-network", Queue{TopicID: 1, RoomType: 2})
+	if !errors.Is(err, ErrTooManyRequests) {
+		t.Fatalf("err = %v, want %v", err, ErrTooManyRequests)
+	}
+
+	// The request the rate held back put nobody in a queue.
+	state, err := store.Lookup(context.Background(), "bob")
+	if err != nil {
+		t.Fatalf("Lookup: %v", err)
+	}
+	if state.Kind != StateIdle {
+		t.Fatalf("state = %d, want %d", state.Kind, StateIdle)
+	}
+
+	// The rate is counted per address, so the hashed address is what it is
+	// asked about.
+	want := []string{"one-network", "one-network"}
+	if len(rate.subjects) != len(want) || rate.subjects[0] != want[0] || rate.subjects[1] != want[1] {
+		t.Fatalf("subjects = %v, want %v", rate.subjects, want)
 	}
 }

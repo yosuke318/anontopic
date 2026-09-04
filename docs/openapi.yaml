@@ -143,6 +143,11 @@ paths:
         は 2 になる。理由は docs/adr/0009-fall-back-to-a-two-person-room.md にある。
 
         BAN された識別子はキューに入れず 403 を返す。
+
+        同じ IP ハッシュからの要求は `CAPACITY_MATCH_BURST`（既定 3 回）まで続けて受け付け、
+        使い切ったあとは `CAPACITY_MATCH_INTERVAL`（既定 10 秒）に 1 回ずつ回復する。
+        レートを超えた要求はキューに入れず 429 を返す。理由は
+        [ADR-0013](adr/0013-cap-connections-with-leases-in-redis.md) にある。
       security:
         - sessionCookie: []
       requestBody:
@@ -190,6 +195,21 @@ paths:
                 type: string
                 examples:
                   - already waiting in another queue
+        "429":
+          description: マッチングを要求するレートを超えた
+          headers:
+            Retry-After:
+              description: 次に要求してよいまでの秒数
+              schema:
+                type: integer
+                examples:
+                  - 10
+          content:
+            text/plain:
+              schema:
+                type: string
+                examples:
+                  - asking to be matched too often
         "500":
           $ref: "#/components/responses/InternalServerError"
 
@@ -248,6 +268,12 @@ paths:
       description: |
         マッチングで成立した会話に接続する。`roomID` は `/api/matching` が返した会話 ID。
 
+        サービス全体が `CAPACITY_MAX_CONNECTIONS`（既定 1,000）本の接続を持っている間は、
+        セッションを検証する前に 503 で拒否する。1 つの IP ハッシュが
+        `CAPACITY_MAX_CONNECTIONS_PER_IP`（既定 5）本を持っている場合は 429 を返す。
+        どちらも `Retry-After` を付ける。理由は
+        [ADR-0013](adr/0013-cap-connections-with-leases-in-redis.md) にある。
+
         Origin ヘッダが `APP_ALLOWED_ORIGINS` にも自ホストにも一致しない場合は、
         セッションを検証する前に 403 で拒否する。検証はセッションの寿命を延ばすため、
         他サイトのページが他人のセッションを延命できないようにしている。
@@ -265,10 +291,13 @@ paths:
         | `participant_left` | 誰かが退出した |
         | `message` | メッセージ。`participant`（送信者の番号）/ `body` / `sent_at` が入る。送信者にも同じものが届く |
         | `ended` | 会話が終了した。`reason` は `conversations.end_reason` の値。これを最後にサーバーが接続を閉じる |
-        | `error` | 送信者だけに返る。`code` は `invalid_frame` / `empty_body` / `too_long` / `blocked` / `unavailable` |
+        | `error` | 送信者だけに返る。`code` は `invalid_frame` / `empty_body` / `too_long` / `blocked` / `rate_limited` / `unavailable` |
 
         参加者は会話ごとの番号（1 起点）で表す。セッショントークンは他の参加者に渡らない。
         本文が 2000 文字を超えるメッセージは `too_long` で拒否する。
+        送信は `CAPACITY_MESSAGE_BURST`（既定 5 通）まで続けて受け付け、使い切ったあとは
+        `CAPACITY_MESSAGE_INTERVAL`（既定 1 秒）に 1 通ずつ回復する。超えた送信は
+        `rate_limited` で拒否し、部屋には配信しない。
 
         メッセージは配信された後にまとめて保存される。`sent_at` はサーバーが受け付けた
         時刻で、保存される時刻と同じものになる。理由は
@@ -315,8 +344,38 @@ paths:
                 type: string
                 examples:
                   - the conversation has ended
+        "429":
+          description: 同じ IP ハッシュが持てる接続数を超えた
+          headers:
+            Retry-After:
+              description: 次に接続してよいまでの秒数
+              schema:
+                type: integer
+                examples:
+                  - 10
+          content:
+            text/plain:
+              schema:
+                type: string
+                examples:
+                  - too many connections
         "500":
           $ref: "#/components/responses/InternalServerError"
+        "503":
+          description: サービス全体が持てる接続数に達している
+          headers:
+            Retry-After:
+              description: 次に接続してよいまでの秒数
+              schema:
+                type: integer
+                examples:
+                  - 10
+          content:
+            text/plain:
+              schema:
+                type: string
+                examples:
+                  - the service is busy
 
   /api/topics:
     get:

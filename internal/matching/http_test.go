@@ -152,7 +152,7 @@ func TestEndpointsRefuseARequestWithoutASession(t *testing.T) {
 
 func TestJoinEndpointRefusesRequestsItCannotQueue(t *testing.T) {
 	svc := NewService(newFakeStore(), newFakeRepository(), fakeTopics{active: []int{1}},
-		fakeBans{banned: []string{"ip-hash-banned"}}, Options{})
+		fakeBans{banned: []string{"ip-hash-banned"}}, nil, Options{})
 	mux := newTestMux(t, svc)
 
 	cases := []struct {
@@ -187,5 +187,19 @@ func TestJoinEndpointAnswers409ForAUserWaitingInAnotherQueue(t *testing.T) {
 	rec := do(mux, http.MethodPost, "/api/matching", "alice", `{"topic_id":2,"room_type":2}`)
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusConflict)
+	}
+}
+
+func TestJoinEndpointAnswersAnAddressAskingTooOften(t *testing.T) {
+	svc := NewService(newFakeStore(), newFakeRepository(), fakeTopics{active: []int{1}},
+		fakeBans{}, &fakeRate{}, Options{})
+	mux := newTestMux(t, svc)
+
+	rec := do(mux, http.MethodPost, "/api/matching", "alice", `{"topic_id":1,"room_type":2}`)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusTooManyRequests)
+	}
+	if rec.Header().Get("Retry-After") == "" {
+		t.Fatal("no Retry-After was sent")
 	}
 }
