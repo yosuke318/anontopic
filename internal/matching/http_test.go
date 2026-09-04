@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // testTokenHeader carries the session token a test request stands for.
@@ -152,7 +153,7 @@ func TestEndpointsRefuseARequestWithoutASession(t *testing.T) {
 
 func TestJoinEndpointRefusesRequestsItCannotQueue(t *testing.T) {
 	svc := NewService(newFakeStore(), newFakeRepository(), fakeTopics{active: []int{1}},
-		fakeBans{banned: []string{"ip-hash-banned"}}, Options{})
+		fakeBans{banned: []string{"ip-hash-banned"}}, nil, Options{})
 	mux := newTestMux(t, svc)
 
 	cases := []struct {
@@ -187,5 +188,34 @@ func TestJoinEndpointAnswers409ForAUserWaitingInAnotherQueue(t *testing.T) {
 	rec := do(mux, http.MethodPost, "/api/matching", "alice", `{"topic_id":2,"room_type":2}`)
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusConflict)
+	}
+}
+
+func TestJoinEndpointAnswersAnAddressAskingTooOften(t *testing.T) {
+	// Retry-After is the wait the limiter asked for, so that a deployment
+	// that changes the rate does not leave the header saying something else.
+	cases := map[string]struct {
+		retryAfter time.Duration
+		want       string
+	}{
+		"the wait the limiter asked for":                 {30 * time.Second, "30"},
+		"a wait that is not whole seconds is rounded up": {1500 * time.Millisecond, "2"},
+		"a wait under a second still asks for one":       {200 * time.Millisecond, "1"},
+		"a limiter that named no wait":                   {0, "10"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			svc := NewService(newFakeStore(), newFakeRepository(), fakeTopics{active: []int{1}},
+				fakeBans{}, &fakeRate{retryAfter: c.retryAfter}, Options{})
+			mux := newTestMux(t, svc)
+
+			rec := do(mux, http.MethodPost, "/api/matching", "alice", `{"topic_id":1,"room_type":2}`)
+			if rec.Code != http.StatusTooManyRequests {
+				t.Fatalf("status = %d, want %d", rec.Code, http.StatusTooManyRequests)
+			}
+			if got := rec.Header().Get("Retry-After"); got != c.want {
+				t.Fatalf("Retry-After = %q, want %q", got, c.want)
+			}
+		})
 	}
 }

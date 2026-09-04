@@ -5,12 +5,18 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
+	"strconv"
 	"time"
 )
 
 // maxRequestBytes caps a join request, which holds a topic and a room type.
 const maxRequestBytes = 1 << 10
+
+// fallbackRetryAfterSeconds is what a client asking to be matched too often
+// is told to wait when the limiter named no wait of its own.
+const fallbackRetryAfterSeconds = "10"
 
 // Handler exposes the matching module's HTTP surface.
 type Handler struct {
@@ -187,10 +193,26 @@ func writeError(w http.ResponseWriter, op string, err error) {
 		http.Error(w, "already waiting in another queue", http.StatusConflict)
 	case errors.Is(err, ErrAlreadyMatched):
 		http.Error(w, "already matched", http.StatusConflict)
+	case errors.Is(err, ErrTooManyRequests):
+		w.Header().Set("Retry-After", retryAfter(err))
+		http.Error(w, "asking to be matched too often", http.StatusTooManyRequests)
 	default:
 		slog.Error(op, slog.Any("error", err))
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 	}
+}
+
+// retryAfter is the seconds a refused caller is told to wait, taken from the
+// wait the limiter asked for. A wait under a second is rounded up, because
+// the header counts in whole seconds and a zero invites an immediate retry.
+func retryAfter(err error) string {
+	var refused tooManyRequests
+	if !errors.As(err, &refused) || refused.after <= 0 {
+		return fallbackRetryAfterSeconds
+	}
+
+	seconds := int(math.Ceil(refused.after.Seconds()))
+	return strconv.Itoa(seconds)
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {

@@ -59,6 +59,9 @@ operations:
       クライアントが送れるフレームはこれだけ。本文は前後の空白を落としてから扱い、
       空になるもの（`empty_body`）と 2000 文字を超えるもの（`too_long`）は拒否する。
 
+      送信レートを超えたフレームは本文を見ずに `rate_limited` で拒否する。上限と回復の
+      間隔は [openapi.yaml](openapi.yaml) の `/ws/rooms/{roomID}` に書いてある。
+
       受け取った本文はモデレーションにかけ、ブロックされたものは誰にも配らず送信者に
       `blocked` を返す。配るものは保存のために受け付けてから部屋に流す。
     messages:
@@ -232,10 +235,12 @@ components:
               - empty_body
               - too_long
               - blocked
+              - rate_limited
               - unavailable
             description: |
               `invalid_frame` は読めない JSON か知らない `type`、`empty_body` は空の本文、
               `too_long` は 2000 文字超、`blocked` はモデレーションが配信を止めたもの、
+              `rate_limited` は送信レートを超えたもの、
               `unavailable` は部屋かメッセージの取り扱いに失敗したもの。
           message:
             type: string
