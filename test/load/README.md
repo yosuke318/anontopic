@@ -20,7 +20,7 @@ Vegeta は HTTP のみを対象とする。WebSocket（`/ws/rooms/{roomID}`）�
 
 ## 同時接続の上限を確かめる
 
-同時接続数は Redis 上の期限付きの席で数える。上限に達すると、ハンドシェイクは
+同時接続数は Redis 上のリースで数える。上限に達すると、ハンドシェイクは
 セッションを読む前に 503 を返す。理由は
 [ADR-0013](../../docs/adr/0013-cap-connections-with-leases-in-redis.md) にある。
 
@@ -30,7 +30,7 @@ Vegeta は HTTP のみを対象とする。WebSocket（`/ws/rooms/{roomID}`）�
 CAPACITY_MAX_CONNECTIONS=5 make up   # compose 経由。make backend-run でも同じ変数が効く
 ```
 
-数えている席は Redis から直接読める。試験中にこの値が上限を超えないことが、
+数えているリースは Redis から直接読める。試験中にこの値が上限を超えないことが、
 上限が守られている証拠になる。
 
 ```bash
@@ -38,7 +38,7 @@ docker compose exec redis redis-cli ZCARD capacity:connections
 docker compose exec redis redis-cli --stat   # 試験中に張り付けて増減を見る
 ```
 
-席は接続が閉じるときに返り、返らなかった席も `CAPACITY_LEASE_TTL`（既定 30 秒）で空く。
+リースは接続が閉じるときに返り、返らなかったリースも `CAPACITY_LEASE_TTL`（既定 30 秒）で切れる。
 サーバーを `kill -9` してから 30 秒待つと `ZCARD` が 0 に戻ることで、異常終了しても
 数が減らないまま詰まらないことを確認できる。
 
