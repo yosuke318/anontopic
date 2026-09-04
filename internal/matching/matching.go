@@ -64,7 +64,24 @@ var (
 	// session token twice, which would leave the room type of the conversation
 	// higher than the number of participants recorded in it.
 	ErrDuplicateParticipant = errors.New("matching: duplicate participant")
+
+	// ErrTooManyRequests is returned when an address asks to be matched
+	// faster than it is allowed to. The wait the limiter asked for is read
+	// out of the error with errors.As on tooManyRequests.
+	ErrTooManyRequests = errors.New("matching: asking to be matched too often")
 )
+
+// tooManyRequests is ErrTooManyRequests together with the wait before the
+// caller may ask again, which the handler answers with.
+type tooManyRequests struct {
+	after time.Duration
+}
+
+func (e tooManyRequests) Error() string { return ErrTooManyRequests.Error() }
+
+// Is makes errors.Is(err, ErrTooManyRequests) hold for this error, so that
+// callers match the sentinel rather than the type carrying the wait.
+func (e tooManyRequests) Is(target error) bool { return target == ErrTooManyRequests }
 
 // Queue identifies one waiting queue: the topic its users picked and the type
 // of room they wait for.
@@ -114,6 +131,12 @@ type SessionAuthenticator interface {
 	IPHash(r *http.Request) string
 }
 
+// RequestLimiter reports whether an address may ask to be matched again now,
+// and how long it has to wait when it may not.
+type RequestLimiter interface {
+	AllowMatch(ctx context.Context, subject string) (bool, time.Duration, error)
+}
+
 // TopicCatalogue reports whether users can queue for a topic.
 type TopicCatalogue interface {
 	IsActive(ctx context.Context, id int) (bool, error)
@@ -130,6 +153,7 @@ type Service struct {
 	repo   Repository
 	topics TopicCatalogue
 	bans   BanList
+	rate   RequestLimiter
 
 	waitTTL       time.Duration
 	fallbackAfter time.Duration
@@ -149,8 +173,9 @@ type Options struct {
 	RoomTTL time.Duration
 }
 
-// NewService builds a Service.
-func NewService(store Store, repo Repository, topics TopicCatalogue, bans BanList, opts Options) *Service {
+// NewService builds a Service. A nil rate limiter takes requests to be
+// matched however fast they arrive.
+func NewService(store Store, repo Repository, topics TopicCatalogue, bans BanList, rate RequestLimiter, opts Options) *Service {
 	if opts.WaitTTL <= 0 {
 		opts.WaitTTL = DefaultWaitTTL
 	}
@@ -166,6 +191,7 @@ func NewService(store Store, repo Repository, topics TopicCatalogue, bans BanLis
 		repo:          repo,
 		topics:        topics,
 		bans:          bans,
+		rate:          rate,
 		waitTTL:       opts.WaitTTL,
 		fallbackAfter: opts.FallbackAfter,
 		roomTTL:       opts.RoomTTL,
@@ -178,6 +204,14 @@ func NewService(store Store, repo Repository, topics TopicCatalogue, bans BanLis
 func (s *Service) Join(ctx context.Context, token, ipHash string, q Queue) (State, error) {
 	if q.RoomType != roomTypeTwo && q.RoomType != roomTypeThree {
 		return State{}, ErrInvalidRoomType
+	}
+
+	allowed, retryAfter, err := s.allowMatch(ctx, ipHash)
+	if err != nil {
+		return State{}, fmt.Errorf("read the matching rate: %w", err)
+	}
+	if !allowed {
+		return State{}, tooManyRequests{after: retryAfter}
 	}
 
 	banned, err := s.bans.IsBanned(ctx, ipHash)
@@ -205,6 +239,15 @@ func (s *Service) Join(ctx context.Context, token, ipHash string, q Queue) (Stat
 	}
 
 	return s.State(ctx, token)
+}
+
+// allowMatch asks the limiter whether the address is within its rate.
+// Without one, every request is taken.
+func (s *Service) allowMatch(ctx context.Context, ipHash string) (bool, time.Duration, error) {
+	if s.rate == nil {
+		return true, 0, nil
+	}
+	return s.rate.AllowMatch(ctx, ipHash)
 }
 
 // State reports what the user behind token is doing, forming a room first if

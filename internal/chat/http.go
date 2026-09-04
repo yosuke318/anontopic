@@ -10,24 +10,33 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// retryAfterSeconds is what a client refused for capacity is asked to wait
+// before it tries again. It is long enough that the refused clients do not
+// come back as one wave, and short enough that a seat freed by someone
+// leaving is taken soon after.
+const retryAfterSeconds = "10"
+
 // Handler exposes the chat module's HTTP/WebSocket surface.
 type Handler struct {
 	svc         *Service
 	sessions    SessionAuthenticator
+	connections ConnectionLimiter
 	upgrader    websocket.Upgrader
 	checkOrigin func(*http.Request) bool
 }
 
 // NewHandler builds a chat handler that accepts WebSocket handshakes from
 // allowedOrigins, plus those whose Origin matches the host they were sent to.
-func NewHandler(svc *Service, sessions SessionAuthenticator, allowedOrigins []string) *Handler {
+// A nil connections limiter accepts as many connections as arrive.
+func NewHandler(svc *Service, sessions SessionAuthenticator, connections ConnectionLimiter, allowedOrigins []string) *Handler {
 	// The handler and the upgrader share one function so that both stages of
 	// the handshake accept the same set of sites.
 	checkOrigin := originChecker(allowedOrigins)
 
 	return &Handler{
-		svc:      svc,
-		sessions: sessions,
+		svc:         svc,
+		sessions:    sessions,
+		connections: connections,
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -53,6 +62,17 @@ func (h *Handler) handleRoomSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The connection is counted before the session is read, so that the
+	// connections the service is refusing cost it a single Redis call each.
+	// The place is held until this handler returns, which is when the
+	// connection it counts is closed.
+	release, err := h.acquire(r)
+	if err != nil {
+		writeCapacityError(w, err)
+		return
+	}
+	defer release()
+
 	token, err := h.sessions.Authenticate(r)
 	if err != nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -76,6 +96,36 @@ func (h *Handler) handleRoomSocket(w http.ResponseWriter, r *http.Request) {
 	// connection keeps its request context, and the server does not wait for
 	// it when it shuts down.
 	h.svc.Serve(r.Context(), ws, adm)
+}
+
+// acquire counts the connection r is asking for and returns the function that
+// gives its place back. Without a limiter nothing is counted: every handshake
+// goes through, and the function it returns does nothing.
+func (h *Handler) acquire(r *http.Request) (func(), error) {
+	if h.connections == nil {
+		return func() {}, nil
+	}
+	return h.connections.Acquire(r.Context(), h.sessions.IPHash(r))
+}
+
+// writeCapacityError answers a handshake there was no room for. A service
+// holding every connection it may hold answers 503, and an address holding
+// every connection it may hold answers 429, so that a client can tell a busy
+// service from its own doing.
+func writeCapacityError(w http.ResponseWriter, err error) {
+	var refused Refusal
+	if !errors.As(err, &refused) {
+		slog.Error("count the connection", slog.Any("error", err))
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Retry-After", retryAfterSeconds)
+	if refused.AtCapacity() {
+		http.Error(w, "the service is busy", http.StatusServiceUnavailable)
+		return
+	}
+	http.Error(w, "too many connections", http.StatusTooManyRequests)
 }
 
 // writeAdmissionError answers a handshake the room did not admit. A

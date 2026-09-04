@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -23,9 +24,9 @@ func testHandler(t *testing.T, allowedOrigins []string) (*Handler, *fakeReposito
 
 	repo := newFakeRepository(tokenAlice, tokenBob)
 	sessions := &stubAuthenticator{tokens: []string{tokenAlice, tokenBob}}
-	svc := NewService(repo, newFakeStore(), nil, testOptions())
+	svc := NewService(repo, newFakeStore(), nil, nil, testOptions())
 
-	return NewHandler(svc, sessions, allowedOrigins), repo, sessions
+	return NewHandler(svc, sessions, nil, allowedOrigins), repo, sessions
 }
 
 func TestRoomSocketRejectsRequestsWithoutASession(t *testing.T) {
@@ -148,5 +149,77 @@ func TestOriginCheckerAdmitsOurOwnPagesOnly(t *testing.T) {
 				t.Fatalf("originChecker(%q) = %v, want %v", tc.origin, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestRoomSocketRefusesAHandshakeThereIsNoRoomFor(t *testing.T) {
+	tests := map[string]struct {
+		err  error
+		want int
+	}{
+		"the service holds every connection it may": {
+			err:  stubRefusal{message: "at capacity", atCapacity: true},
+			want: http.StatusServiceUnavailable,
+		},
+		"the address holds every connection it may": {
+			err:  stubRefusal{message: "too many from one address"},
+			want: http.StatusTooManyRequests,
+		},
+		"the count could not be read": {
+			err:  errors.New("redis is unreachable"),
+			want: http.StatusInternalServerError,
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			repo := newFakeRepository(tokenAlice, tokenBob)
+			sessions := &stubAuthenticator{tokens: []string{tokenAlice}}
+			svc := NewService(repo, newFakeStore(), nil, nil, testOptions())
+			connections := &stubConnectionLimiter{err: tc.err}
+			h := NewHandler(svc, sessions, connections, nil)
+
+			rec := httptest.NewRecorder()
+			h.handleRoomSocket(rec, roomRequest(repo.conv.ID, &http.Cookie{
+				Name:  "anontopic_session",
+				Value: tokenAlice,
+			}))
+
+			if rec.Code != tc.want {
+				t.Fatalf("status = %d, want %d", rec.Code, tc.want)
+			}
+			// A connection there is no room for costs no session lookup.
+			if sessions.callCount() != 0 {
+				t.Fatalf("the session was read %d times, want 0", sessions.callCount())
+			}
+			if tc.want != http.StatusInternalServerError && rec.Header().Get("Retry-After") == "" {
+				t.Fatal("no Retry-After was sent")
+			}
+		})
+	}
+}
+
+func TestRoomSocketGivesBackThePlaceOfAHandshakeItRefuses(t *testing.T) {
+	repo := newFakeRepository(tokenAlice, tokenBob)
+	sessions := &stubAuthenticator{tokens: []string{tokenAlice}}
+	svc := NewService(repo, newFakeStore(), nil, nil, testOptions())
+	connections := &stubConnectionLimiter{}
+	h := NewHandler(svc, sessions, connections, nil)
+
+	rec := httptest.NewRecorder()
+	h.handleRoomSocket(rec, roomRequest(repo.conv.ID, &http.Cookie{
+		Name:  "anontopic_session",
+		Value: "someone-elses-token",
+	}))
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+
+	acquired, released := connections.counts()
+	if acquired != 1 || released != 1 {
+		t.Fatalf("acquired %d and released %d places, want 1 and 1", acquired, released)
+	}
+	if seen := connections.seen(); len(seen) != 1 || seen[0] != sessions.IPHash(nil) {
+		t.Fatalf("counted against %v, want the hashed address of the request", seen)
 	}
 }

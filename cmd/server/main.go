@@ -23,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/yosuke318/anontopic/internal/capacity"
 	"github.com/yosuke318/anontopic/internal/chat"
 	"github.com/yosuke318/anontopic/internal/matching"
 	"github.com/yosuke318/anontopic/internal/report"
@@ -85,6 +86,8 @@ func run() error {
 	addr := envOr("APP_ADDR", defaultAddr)
 	allowedOrigins := splitList(envOr("APP_ALLOWED_ORIGINS", defaultAllowedOrigins))
 
+	limits := newCapacityService(rdb)
+
 	topics := topic.NewService(topic.NewPostgresRepository(pool), topic.Options{
 		CacheTTL: envDuration("TOPIC_CACHE_TTL", topic.DefaultCacheTTL),
 	})
@@ -94,6 +97,7 @@ func run() error {
 		matching.NewPostgresRepository(pool),
 		topics,
 		report.NewPostgresBanList(pool),
+		limits,
 		matching.Options{
 			WaitTTL:       envDuration("MATCHING_WAIT_TTL", matching.DefaultWaitTTL),
 			FallbackAfter: envDuration("MATCHING_FALLBACK_AFTER", matching.DefaultFallbackAfter),
@@ -105,13 +109,13 @@ func run() error {
 		slog.Warn("ADMIN_API_TOKEN is unset, the topic administration endpoints are not served")
 	}
 
-	chats := newChatService(pool, rdb)
+	chats := newChatService(pool, rdb, limits)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", handleHealth)
 	mux.HandleFunc("GET /readyz", handleReady(pool, rdb))
 	session.NewHandler(sessions).Register(mux)
-	chat.NewHandler(chats, sessions, allowedOrigins).Register(mux)
+	chat.NewHandler(chats, sessions, limits, allowedOrigins).Register(mux)
 	topic.NewHandler(topics, adminToken).Register(mux)
 	matching.NewHandler(matches, sessions).Register(mux)
 
@@ -183,17 +187,44 @@ func handleReady(pool *pgxpool.Pool, rdb *redis.Client) http.HandlerFunc {
 
 // newChatService builds the chat module from the environment. No moderation
 // is wired into it, so a message reaches the room as it was written.
-func newChatService(pool *pgxpool.Pool, rdb *redis.Client) *chat.Service {
+func newChatService(pool *pgxpool.Pool, rdb *redis.Client, limits *capacity.Service) *chat.Service {
 	slog.Warn("no moderation is wired into chat, messages are delivered without being judged")
 
 	return chat.NewService(
 		chat.NewPostgresRepository(pool),
 		chat.NewRedisStore(rdb),
 		nil,
+		limits,
 		chat.Options{
 			RejoinGrace: envDuration("CHAT_REJOIN_GRACE", chat.DefaultRejoinGrace),
 		},
 	)
+}
+
+// newCapacityService builds the limits the service refuses work at. The
+// number of connections is what the running cost is budgeted against, so the
+// value it takes is logged at startup.
+func newCapacityService(rdb *redis.Client) *capacity.Service {
+	opts := capacity.Options{
+		Connections:   envInt("CAPACITY_MAX_CONNECTIONS", capacity.DefaultConnections),
+		PerIPHash:     envInt("CAPACITY_MAX_CONNECTIONS_PER_IP", capacity.DefaultPerIPHash),
+		LeaseTTL:      envDuration("CAPACITY_LEASE_TTL", capacity.DefaultLeaseTTL),
+		RenewInterval: envDuration("CAPACITY_RENEW_INTERVAL", capacity.DefaultRenewInterval),
+		Message: capacity.Limit{
+			Burst:    envInt("CAPACITY_MESSAGE_BURST", capacity.DefaultMessageLimit.Burst),
+			Interval: envDuration("CAPACITY_MESSAGE_INTERVAL", capacity.DefaultMessageLimit.Interval),
+		},
+		Match: capacity.Limit{
+			Burst:    envInt("CAPACITY_MATCH_BURST", capacity.DefaultMatchLimit.Burst),
+			Interval: envDuration("CAPACITY_MATCH_INTERVAL", capacity.DefaultMatchLimit.Interval),
+		},
+	}
+
+	slog.Info("connection limits",
+		slog.Int("connections", opts.Connections),
+		slog.Int("per_ip_hash", opts.PerIPHash))
+
+	return capacity.NewService(capacity.NewRedisStore(rdb), opts)
 }
 
 // newSessionService builds the session module from the environment.
@@ -287,6 +318,14 @@ func envDuration(key string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return d
+}
+
+func envInt(key string, fallback int) int {
+	n, err := strconv.Atoi(os.Getenv(key))
+	if err != nil {
+		return fallback
+	}
+	return n
 }
 
 func envBool(key string, fallback bool) bool {

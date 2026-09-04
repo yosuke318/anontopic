@@ -37,6 +37,93 @@ func (a *stubAuthenticator) Authenticate(r *http.Request) (string, error) {
 	return c.Value, nil
 }
 
+// IPHash stands for the hashed address the session was issued to. Every
+// request a test sends comes from the same one.
+func (a *stubAuthenticator) IPHash(*http.Request) string { return "test-ip-hash" }
+
+// stubConnectionLimiter answers every handshake with err, and counts the
+// places it handed out and took back.
+type stubConnectionLimiter struct {
+	err error
+
+	mu        sync.Mutex
+	acquired  int
+	released  int
+	addresses []string
+}
+
+func (l *stubConnectionLimiter) Acquire(_ context.Context, ipHash string) (func(), error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	l.addresses = append(l.addresses, ipHash)
+	if l.err != nil {
+		return nil, l.err
+	}
+	l.acquired++
+
+	return func() {
+		l.mu.Lock()
+		defer l.mu.Unlock()
+
+		l.released++
+	}, nil
+}
+
+// counts is how many places the limiter handed out and how many came back.
+func (l *stubConnectionLimiter) counts() (int, int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	return l.acquired, l.released
+}
+
+func (l *stubConnectionLimiter) seen() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	return slices.Clone(l.addresses)
+}
+
+// stubRefusal is what a ConnectionLimiter says about a connection it did not
+// count.
+type stubRefusal struct {
+	message    string
+	atCapacity bool
+}
+
+func (r stubRefusal) Error() string    { return r.message }
+func (r stubRefusal) AtCapacity() bool { return r.atCapacity }
+
+// stubMessageLimiter holds back every message once allow is false.
+type stubMessageLimiter struct {
+	mu       sync.Mutex
+	allow    bool
+	subjects []string
+}
+
+func (l *stubMessageLimiter) AllowMessage(_ context.Context, subject string) (bool, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	l.subjects = append(l.subjects, subject)
+	return l.allow, nil
+}
+
+func (l *stubMessageLimiter) hold() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	l.allow = false
+}
+
+func (l *stubMessageLimiter) senders() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	return slices.Clone(l.subjects)
+}
+
 func (a *stubAuthenticator) callCount() int {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -307,11 +394,12 @@ func testOptions() Options {
 }
 
 // newTestServer starts one server on the given repository and store. Starting
-// two of them on the same pair stands for two servers of one deployment.
-func newTestServer(t *testing.T, repo Repository, store Store, moderator Moderator, opts Options, tokens ...string) *httptest.Server {
+// two of them on the same pair stands for two servers of one deployment. A nil
+// messages limiter takes messages however fast they are sent.
+func newTestServer(t *testing.T, repo Repository, store Store, moderator Moderator, messages MessageLimiter, opts Options, tokens ...string) *httptest.Server {
 	t.Helper()
 
-	svc := NewService(repo, store, moderator, opts)
+	svc := NewService(repo, store, moderator, messages, opts)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -322,7 +410,7 @@ func newTestServer(t *testing.T, repo Repository, store Store, moderator Moderat
 	})
 
 	mux := http.NewServeMux()
-	NewHandler(svc, &stubAuthenticator{tokens: tokens}, nil).Register(mux)
+	NewHandler(svc, &stubAuthenticator{tokens: tokens}, nil, nil).Register(mux)
 
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
