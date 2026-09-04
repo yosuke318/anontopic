@@ -210,16 +210,20 @@ func (t fakeTopics) IsActive(_ context.Context, id int) (bool, error) {
 	return slices.Contains(t.active, id), nil
 }
 
-// fakeRate holds back every request once allow is false, and records the
-// subjects it was asked about.
+// fakeRate holds back every request once allow is false, records the subjects
+// it was asked about, and names retryAfter as the wait it wants.
 type fakeRate struct {
-	allow    bool
-	subjects []string
+	allow      bool
+	retryAfter time.Duration
+	subjects   []string
 }
 
-func (r *fakeRate) AllowMatch(_ context.Context, subject string) (bool, error) {
+func (r *fakeRate) AllowMatch(_ context.Context, subject string) (bool, time.Duration, error) {
 	r.subjects = append(r.subjects, subject)
-	return r.allow, nil
+	if r.allow {
+		return true, 0, nil
+	}
+	return false, r.retryAfter, nil
 }
 
 // fakeBans answers for a fixed set of banned hashes.

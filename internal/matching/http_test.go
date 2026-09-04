@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // testTokenHeader carries the session token a test request stands for.
@@ -191,15 +192,30 @@ func TestJoinEndpointAnswers409ForAUserWaitingInAnotherQueue(t *testing.T) {
 }
 
 func TestJoinEndpointAnswersAnAddressAskingTooOften(t *testing.T) {
-	svc := NewService(newFakeStore(), newFakeRepository(), fakeTopics{active: []int{1}},
-		fakeBans{}, &fakeRate{}, Options{})
-	mux := newTestMux(t, svc)
-
-	rec := do(mux, http.MethodPost, "/api/matching", "alice", `{"topic_id":1,"room_type":2}`)
-	if rec.Code != http.StatusTooManyRequests {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusTooManyRequests)
+	// Retry-After is the wait the limiter asked for, so that a deployment
+	// that changes the rate does not leave the header saying something else.
+	cases := map[string]struct {
+		retryAfter time.Duration
+		want       string
+	}{
+		"the wait the limiter asked for":                 {30 * time.Second, "30"},
+		"a wait that is not whole seconds is rounded up": {1500 * time.Millisecond, "2"},
+		"a wait under a second still asks for one":       {200 * time.Millisecond, "1"},
+		"a limiter that named no wait":                   {0, "10"},
 	}
-	if rec.Header().Get("Retry-After") == "" {
-		t.Fatal("no Retry-After was sent")
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			svc := NewService(newFakeStore(), newFakeRepository(), fakeTopics{active: []int{1}},
+				fakeBans{}, &fakeRate{retryAfter: c.retryAfter}, Options{})
+			mux := newTestMux(t, svc)
+
+			rec := do(mux, http.MethodPost, "/api/matching", "alice", `{"topic_id":1,"room_type":2}`)
+			if rec.Code != http.StatusTooManyRequests {
+				t.Fatalf("status = %d, want %d", rec.Code, http.StatusTooManyRequests)
+			}
+			if got := rec.Header().Get("Retry-After"); got != c.want {
+				t.Fatalf("Retry-After = %q, want %q", got, c.want)
+			}
+		})
 	}
 }

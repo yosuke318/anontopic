@@ -187,7 +187,7 @@ API サーバーの設定は環境変数で行う。
 | `CAPACITY_MAX_CONNECTIONS` | `1000` | 全サーバー合計で同時に持つ WebSocket 接続の上限。達している間は新規接続を 503 で拒否する |
 | `CAPACITY_MAX_CONNECTIONS_PER_IP` | `5` | 1 つの IP ハッシュが同時に持てる接続数。超えた接続は 429 で拒否する |
 | `CAPACITY_LEASE_TTL` | `30s` | 接続が席を持ち続ける時間。更新が止まった席はこの時間で空く |
-| `CAPACITY_RENEW_INTERVAL` | `10s` | 開いている接続が席を確保し直す間隔。`CAPACITY_LEASE_TTL` より十分短くする |
+| `CAPACITY_RENEW_INTERVAL` | `10s` | 開いている接続が席を確保し直す間隔。`CAPACITY_LEASE_TTL` の 1/3 に収まらない値は起動時に切り詰める |
 | `CAPACITY_MESSAGE_BURST` | `5` | 続けて送れるメッセージ数 |
 | `CAPACITY_MESSAGE_INTERVAL` | `1s` | 送信枠が 1 通ずつ回復する間隔 |
 | `CAPACITY_MATCH_BURST` | `3` | 続けて出せるマッチング要求の数。IP ハッシュ単位で数える |

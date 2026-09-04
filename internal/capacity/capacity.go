@@ -46,6 +46,12 @@ const (
 	// DefaultRenewInterval is how often an open connection renews its lease.
 	DefaultRenewInterval = 10 * time.Second
 
+	// renewalsPerLease is how many times a connection renews its place before
+	// the lease on it would run out. A renewal that is late or lost has to be
+	// able to happen again before an open connection drops out of the count,
+	// which is what keeps the next connection from being let past the cap.
+	renewalsPerLease = 3
+
 	// leaseIDBytes sizes the identifier one connection holds its place under.
 	leaseIDBytes = 16
 
@@ -133,9 +139,9 @@ type Options struct {
 	PerIPHash int
 	// LeaseTTL defaults to DefaultLeaseTTL.
 	LeaseTTL time.Duration
-	// RenewInterval defaults to DefaultRenewInterval. It has to stay well
-	// under LeaseTTL, so that a renewal that is late or lost does not drop a
-	// connection that is still open out of the count.
+	// RenewInterval defaults to DefaultRenewInterval. An interval that does
+	// not leave room for renewalsPerLease renewals within LeaseTTL is
+	// shortened until it does.
 	RenewInterval time.Duration
 	// Message defaults to DefaultMessageLimit.
 	Message Limit
@@ -157,6 +163,19 @@ func NewService(store Store, opts Options) *Service {
 	if opts.RenewInterval <= 0 {
 		opts.RenewInterval = DefaultRenewInterval
 	}
+	// A place is renewed several times over before its lease runs out. An
+	// interval that does not fit under the lease would let an open connection
+	// drop out of the count between two renewals, and the cap would be read
+	// against a total lower than the connections actually held.
+	if opts.RenewInterval*renewalsPerLease > opts.LeaseTTL {
+		fits := max(opts.LeaseTTL/renewalsPerLease, time.Millisecond)
+		slog.Warn("the renew interval does not fit under the lease, shortening it",
+			slog.Duration("configured", opts.RenewInterval),
+			slog.Duration("lease_ttl", opts.LeaseTTL),
+			slog.Duration("renew_interval", fits))
+		opts.RenewInterval = fits
+	}
+
 	if !opts.Message.valid() {
 		opts.Message = DefaultMessageLimit
 	}
@@ -221,9 +240,15 @@ func (s *Service) AllowMessage(ctx context.Context, subject string) (bool, error
 	return s.store.Take(ctx, rateMessage, subject, s.message, s.now().UTC())
 }
 
-// AllowMatch reports whether subject may ask to be matched again now.
-func (s *Service) AllowMatch(ctx context.Context, subject string) (bool, error) {
-	return s.store.Take(ctx, rateMatch, subject, s.match, s.now().UTC())
+// AllowMatch reports whether subject may ask to be matched again now, and how
+// long it has to wait when it may not. The wait is the interval the bucket
+// earns a token over, which is the soonest the next request can go through.
+func (s *Service) AllowMatch(ctx context.Context, subject string) (bool, time.Duration, error) {
+	allowed, err := s.store.Take(ctx, rateMatch, subject, s.match, s.now().UTC())
+	if err != nil || allowed {
+		return allowed, 0, err
+	}
+	return false, s.match.Interval, nil
 }
 
 // lease is one connection's place in the count.

@@ -66,9 +66,22 @@ var (
 	ErrDuplicateParticipant = errors.New("matching: duplicate participant")
 
 	// ErrTooManyRequests is returned when an address asks to be matched
-	// faster than it is allowed to.
+	// faster than it is allowed to. The wait the limiter asked for is read
+	// out of the error with errors.As on tooManyRequests.
 	ErrTooManyRequests = errors.New("matching: asking to be matched too often")
 )
+
+// tooManyRequests is ErrTooManyRequests together with the wait before the
+// caller may ask again, which the handler answers with.
+type tooManyRequests struct {
+	after time.Duration
+}
+
+func (e tooManyRequests) Error() string { return ErrTooManyRequests.Error() }
+
+// Is makes errors.Is(err, ErrTooManyRequests) hold for this error, so that
+// callers match the sentinel rather than the type carrying the wait.
+func (e tooManyRequests) Is(target error) bool { return target == ErrTooManyRequests }
 
 // Queue identifies one waiting queue: the topic its users picked and the type
 // of room they wait for.
@@ -118,9 +131,10 @@ type SessionAuthenticator interface {
 	IPHash(r *http.Request) string
 }
 
-// RequestLimiter reports whether an address may ask to be matched again now.
+// RequestLimiter reports whether an address may ask to be matched again now,
+// and how long it has to wait when it may not.
 type RequestLimiter interface {
-	AllowMatch(ctx context.Context, subject string) (bool, error)
+	AllowMatch(ctx context.Context, subject string) (bool, time.Duration, error)
 }
 
 // TopicCatalogue reports whether users can queue for a topic.
@@ -192,12 +206,12 @@ func (s *Service) Join(ctx context.Context, token, ipHash string, q Queue) (Stat
 		return State{}, ErrInvalidRoomType
 	}
 
-	allowed, err := s.allowMatch(ctx, ipHash)
+	allowed, retryAfter, err := s.allowMatch(ctx, ipHash)
 	if err != nil {
 		return State{}, fmt.Errorf("read the matching rate: %w", err)
 	}
 	if !allowed {
-		return State{}, ErrTooManyRequests
+		return State{}, tooManyRequests{after: retryAfter}
 	}
 
 	banned, err := s.bans.IsBanned(ctx, ipHash)
@@ -229,9 +243,9 @@ func (s *Service) Join(ctx context.Context, token, ipHash string, q Queue) (Stat
 
 // allowMatch asks the limiter whether the address is within its rate.
 // Without one, every request is taken.
-func (s *Service) allowMatch(ctx context.Context, ipHash string) (bool, error) {
+func (s *Service) allowMatch(ctx context.Context, ipHash string) (bool, time.Duration, error) {
 	if s.rate == nil {
-		return true, nil
+		return true, 0, nil
 	}
 	return s.rate.AllowMatch(ctx, ipHash)
 }
