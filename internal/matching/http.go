@@ -12,6 +12,10 @@ import (
 // maxRequestBytes caps a join request, which holds a topic and a room type.
 const maxRequestBytes = 1 << 10
 
+// retryAfterSeconds is what a client asking to be matched too often is told
+// to wait. It is the interval at which the rate lets one request through.
+const retryAfterSeconds = "10"
+
 // Handler exposes the matching module's HTTP surface.
 type Handler struct {
 	svc      *Service
@@ -187,6 +191,9 @@ func writeError(w http.ResponseWriter, op string, err error) {
 		http.Error(w, "already waiting in another queue", http.StatusConflict)
 	case errors.Is(err, ErrAlreadyMatched):
 		http.Error(w, "already matched", http.StatusConflict)
+	case errors.Is(err, ErrTooManyRequests):
+		w.Header().Set("Retry-After", retryAfterSeconds)
+		http.Error(w, "asking to be matched too often", http.StatusTooManyRequests)
 	default:
 		slog.Error(op, slog.Any("error", err))
 		http.Error(w, "internal server error", http.StatusInternalServerError)

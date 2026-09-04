@@ -36,6 +36,7 @@ const (
 	codeEmptyBody    = "empty_body"
 	codeTooLong      = "too_long"
 	codeBlocked      = "blocked"
+	codeRateLimited  = "rate_limited"
 	codeUnavailable  = "unavailable"
 )
 
