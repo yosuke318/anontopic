@@ -2,25 +2,64 @@
 
 :root {
   --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --surface: #f6f7f9;
+  --surface-strong: #eceff3;
+  --foreground: #16181d;
+  --muted: #5b6472;
+  --line: #dfe3e9;
+  --brand: #0f766e;
+  --brand-hover: #115e56;
+  --brand-soft: #e2f4f1;
+  --brand-contrast: #ffffff;
+  --danger: #b4231f;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #0e1013;
+    --surface: #16191e;
+    --surface-strong: #1e232a;
+    --foreground: #eceef1;
+    --muted: #9aa4b2;
+    --line: #2a2f37;
+    --brand: #5eddcd;
+    --brand-hover: #7ee8da;
+    --brand-soft: #16302e;
+    --brand-contrast: #08201d;
+    --danger: #ff8a84;
   }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-strong: var(--surface-strong);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-contrast: var(--brand-contrast);
+  --color-danger: var(--danger);
+
+  /* 端末に入っているフォントだけで日本語を組み、Web フォントの転送を避ける。 */
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, "Hiragino Kaku Gothic ProN", "Hiragino Sans",
+    "BIZ UDPGothic", Meiryo, sans-serif;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
