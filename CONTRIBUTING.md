@@ -49,6 +49,9 @@
 
 - フォーマットは Prettier（`web/.prettierrc.json`）、Lint は ESLint（`web/eslint.config.mjs`）。
 - push 前に `make frontend-lint && make frontend-build` と `cd web && npm run typecheck` が通ることを確認する。
+- 画面に出す日本語の本文は、JSX に直接書かず文字列として持ち `{text}` で埋める。JSX は
+  複数行にまたがるテキストを空白で連結するため、Prettier が折り返した位置に半角空白が
+  混ざり、「会員登録は いりません」のような表示になる。
 - `next-env.d.ts` と `.next/types/` は `next typegen` が生成するファイルなので Git 管理外。
   `npm install`（postinstall）、`npm run typecheck`、`npm run build` がそれぞれ生成するため、
   通常は意識しなくてよい。クローン直後にエディタが `LayoutProps` 等を解決できない場合は
