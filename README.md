@@ -193,6 +193,35 @@ API サーバーの設定は環境変数で行う。
 | `CAPACITY_MATCH_BURST` | `3` | 続けて出せるマッチング要求の数。IP ハッシュ単位で数える |
 | `CAPACITY_MATCH_INTERVAL` | `10s` | マッチング要求の枠が 1 回ずつ回復する間隔 |
 
+### フロントエンド
+
+`web/` の Next.js アプリは、経路ごとに描画方法を分けている。理由は
+[ADR-0014](docs/adr/0014-render-the-marketing-pages-statically-and-the-topic-pages-per-request.md)
+にある。
+
+| 経路 | 描画 | 内容 |
+| --- | --- | --- |
+| `/` | 静的生成 | LP。サービスの説明とトピック選択への導線 |
+| `/about` | 静的生成 | 紹介ページ。使い方、ルーム種別、禁止事項、よくある質問 |
+| `/topics` | リクエストごと | トピックとルーム種別の選択。`GET /api/topics` の結果をサーバーで埋める |
+| `/waiting` | リクエストごと | 待機画面。`GET /api/matching` を 2 秒ごとに読んで成立を待つ |
+
+`sitemap.xml` / `robots.txt` / OGP 画像 / favicon は `web/app/` の Next.js の
+ファイル規約で生成する。`/waiting` はセッションを持つ人にしか意味がないため、
+`robots.txt` でクロール対象から外している。
+
+フロントエンドの設定は環境変数で行う。`NEXT_PUBLIC_` が付く値はブラウザに配られる。
+
+| 変数 | 既定値 | 用途 |
+| --- | --- | --- |
+| `API_BASE_URL` | compose では `http://api:8080` | Next.js のサーバーから見た API のオリジン |
+| `NEXT_PUBLIC_API_BASE_URL` | `http://localhost:8080` | ブラウザから見た API のオリジン |
+| `NEXT_PUBLIC_WS_BASE_URL` | `ws://localhost:8080` | ブラウザから見た WebSocket のオリジン |
+| `NEXT_PUBLIC_SITE_URL` | `http://localhost:3000` | 公開時のオリジン。OGP・canonical・`sitemap.xml` の絶対 URL に使う |
+
+`WEB_PORT` を変えたときは、`NEXT_PUBLIC_SITE_URL` と API 側の `APP_ALLOWED_ORIGINS` も
+同じポートに合わせる。合っていないと、ブラウザからのセッション発行が CORS で止まる。
+
 ### スキーマとデータ
 
 | | migrate | seed |
