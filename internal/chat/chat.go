@@ -296,6 +296,22 @@ func (s *Service) Admit(ctx context.Context, conversationID, token string) (Admi
 	return Admission{Conversation: conv, Token: token, Participant: at + 1}, nil
 }
 
+// IsParticipant reports whether token belongs to a participant of the
+// conversation. A conversation that is over answers as well, so that what
+// happened in a room can still be acted on once it closed. An id no
+// conversation carries is not a participant of anything.
+func (s *Service) IsParticipant(ctx context.Context, conversationID, token string) (bool, error) {
+	conv, err := s.repo.Conversation(ctx, conversationID)
+	if errors.Is(err, ErrConversationNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+
+	return slices.Contains(conv.Participants, token), nil
+}
+
 // Serve carries one connection until it closes: it announces the participant
 // to the room, delivers what the room publishes, and records the departure.
 func (s *Service) Serve(ctx context.Context, ws *websocket.Conn, adm Admission) {

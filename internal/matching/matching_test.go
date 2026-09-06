@@ -473,6 +473,37 @@ func TestLeaveTakesTheUserOutOfTheQueue(t *testing.T) {
 	}
 }
 
+func TestLeaveReleasesTheRoomSoTheUserCanQueueAgain(t *testing.T) {
+	svc, _ := newTestService(t, newFakeStore(), newFakeRepository())
+	q := Queue{TopicID: 1, RoomType: 2}
+
+	join(t, svc, "alice", q)
+	matched := join(t, svc, "bob", q)
+	if matched.Kind != StateMatched {
+		t.Fatalf("kind = %v, want %v", matched.Kind, StateMatched)
+	}
+
+	if err := svc.Leave(context.Background(), "alice"); err != nil {
+		t.Fatalf("Leave: %v", err)
+	}
+
+	state, err := svc.State(context.Background(), "alice")
+	if err != nil {
+		t.Fatalf("State: %v", err)
+	}
+	if state.Kind != StateIdle {
+		t.Fatalf("kind = %v, want %v", state.Kind, StateIdle)
+	}
+
+	again, err := svc.Join(context.Background(), "alice", "ip-hash", q)
+	if err != nil {
+		t.Fatalf("Join: %v", err)
+	}
+	if again.Kind != StateWaiting {
+		t.Fatalf("kind = %v, want %v", again.Kind, StateWaiting)
+	}
+}
+
 func TestAConversationThatCannotBeWrittenReturnsItsParticipants(t *testing.T) {
 	store := newFakeStore()
 	repo := newFakeRepository()

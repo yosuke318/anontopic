@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
-import { ApiError, leaveQueue, readMatchingState, type MatchingState } from "@/lib/matching";
+import { ApiError } from "@/lib/api";
+import { leaveQueue, readMatchingState, type MatchingState } from "@/lib/matching";
 import type { Topic } from "@/lib/topics";
 
 const pollIntervalMs = 2000;
