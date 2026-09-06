@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import { ApiError, leaveQueue, readMatchingState, type MatchingState } from "@/lib/matching";
 import type { Topic } from "@/lib/topics";
@@ -50,6 +50,16 @@ function topicLabel(topicName: string | undefined): string {
   return topicName === undefined ? "選んだトピック" : `「${topicName}」`;
 }
 
+// elapsedSince は待機を始めてからの時間を返す。時刻として読めない値には null を返し、
+// 経過時間そのものを表示しない扱いにする。
+function elapsedSince(waitingSince: string | undefined, now: number): number | null {
+  if (waitingSince === undefined) {
+    return null;
+  }
+  const startedAt = new Date(waitingSince).getTime();
+  return Number.isNaN(startedAt) ? null : now - startedAt;
+}
+
 function formatElapsed(milliseconds: number): string {
   const total = Math.max(0, Math.floor(milliseconds / 1000));
   const minutes = Math.floor(total / 60);
@@ -57,7 +67,7 @@ function formatElapsed(milliseconds: number): string {
   return minutes === 0 ? `${seconds} 秒` : `${minutes} 分 ${seconds} 秒`;
 }
 
-function Screen({ kind, children }: { kind: Status["kind"]; children?: React.ReactNode }) {
+function Screen({ kind, children }: { kind: Status["kind"]; children?: ReactNode }) {
   return (
     <>
       <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">{copy[kind].title}</h1>
@@ -192,8 +202,7 @@ export function WaitingPanel({ topics }: { topics: Topic[] }) {
     );
   }
 
-  const waitingSince = status.state.waiting_since;
-  const elapsed = waitingSince === undefined ? null : now - new Date(waitingSince).getTime();
+  const elapsed = elapsedSince(status.state.waiting_since, now);
 
   return (
     <Screen kind="waiting">
