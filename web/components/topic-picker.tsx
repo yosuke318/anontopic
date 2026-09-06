@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { type FormEvent, useState } from "react";
 
 import { ApiError, issueSession, joinQueue, roomTypes, type RoomType } from "@/lib/matching";
 import type { Topic } from "@/lib/topics";
@@ -40,7 +40,7 @@ export function TopicPicker({ topics }: { topics: Topic[] }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (topicId === null || submitting) {
       return;
