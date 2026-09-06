@@ -25,6 +25,8 @@ tags:
     description: ルーム内のリアルタイム通信
   - name: topic
     description: トピックの一覧と管理
+  - name: report
+    description: 会話の通報
 
 paths:
   /healthz:
@@ -249,8 +251,13 @@ paths:
       operationId: leaveMatching
       summary: 待機をやめる
       description: |
-        キューから抜ける。待機していないリクエストも同じ結果になるため 204 を返す。
-        すでに成立したルームは取り消さない。
+        キューから抜け、成立したルームの割り当ても手放す。どちらも持っていない
+        リクエストは同じ結果になるため 204 を返す。
+
+        会話そのものはここでは終わらない。参加者が接続を切ってから
+        `CHAT_REJOIN_GRACE` を過ぎたときに終わるため、この呼び出しの後も猶予の間は
+        同じ会話に戻れる。理由は
+        [ADR-0011](adr/0011-end-a-conversation-after-a-rejoin-grace.md) にある。
       security:
         - sessionCookie: []
       responses:
@@ -524,6 +531,53 @@ paths:
         "500":
           $ref: "#/components/responses/InternalServerError"
 
+  /api/reports:
+    post:
+      tags: [report]
+      operationId: submitReport
+      summary: 会話を通報する
+      description: |
+        参加した会話を通報する。通報できるのはその会話の参加者だけで、参加していない
+        会話と存在しない会話は区別せず 403 を返す。会話が終わった後も通報できる。
+
+        参加者は互いに匿名で、部屋の中の参加者番号は部屋の外では意味を持たないため、
+        通報の対象は相手ではなく会話そのものになる。通報者が選ぶのは、要件定義書の
+        禁止行為に沿った `reason` の分類だけ。
+
+        同じ会話を同じ通報者が繰り返し通報しても記録は増えない。会話に付く通報の数を、
+        ボタンが押された回数ではなく通報した参加者の人数にするため。
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportSubmission"
+      responses:
+        "204":
+          description: 通報を受け付けた
+        "400":
+          description: リクエストボディが不正、または `reason` が分類にない
+          content:
+            text/plain:
+              schema:
+                type: string
+                examples:
+                  - unknown reason
+        "401":
+          $ref: "#/components/responses/SessionUnauthorized"
+        "403":
+          description: 参加していない会話への通報
+          content:
+            text/plain:
+              schema:
+                type: string
+                examples:
+                  - forbidden
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
 components:
   securitySchemes:
     adminToken:
@@ -656,6 +710,27 @@ components:
           enum: [2, 3]
           examples:
             - 3
+
+    ReportSubmission:
+      type: object
+      description: 通報する会話と、その分類。
+      required: [conversation_id, reason]
+      properties:
+        conversation_id:
+          type: string
+          format: uuid
+          description: 通報する会話の ID
+          examples:
+            - 7f1fca8f-ca30-40c7-a752-ef5ffa6bac2a
+        reason:
+          type: string
+          description: |
+            通報の分類。`sexual` は性的な内容・出会い目的、`contact` は連絡先の交換や
+            外部への誘導、`harassment` は暴言やいやがらせ、`spam` は宣伝、
+            `other` はそれ以外
+          enum: [sexual, contact, harassment, spam, other]
+          examples:
+            - contact
 
     MatchingState:
       type: object

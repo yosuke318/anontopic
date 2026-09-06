@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 
+import { SiteChrome } from "@/components/site-chrome";
 import { siteName } from "@/lib/site";
 
 const description =
@@ -101,7 +102,7 @@ export default function AboutPage() {
   };
 
   return (
-    <>
+    <SiteChrome>
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd).replace(/</g, "\\u003c") }}
@@ -171,6 +172,6 @@ export default function AboutPage() {
           </Link>
         </div>
       </article>
-    </>
+    </SiteChrome>
   );
 }

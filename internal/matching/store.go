@@ -29,8 +29,9 @@ type Store interface {
 	// it readable for ttl.
 	Assign(ctx context.Context, participants []string, conv Conversation, ttl time.Duration) error
 
-	// Discard drops a room FormRoom took out of the queue, which returns its
-	// participants to the state they had before they queued.
+	// Discard drops the room every participant holds, which returns them to
+	// the state they had before they queued. Discarding when no room is held
+	// is not an error.
 	Discard(ctx context.Context, participants []string) error
 
 	// Lookup returns what token is currently doing.

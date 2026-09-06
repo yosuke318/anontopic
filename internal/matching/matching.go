@@ -275,11 +275,20 @@ func (s *Service) State(ctx context.Context, token string) (State, error) {
 	return state, nil
 }
 
-// Leave takes the user behind token out of the queue they wait in. It is not
-// an error to leave a queue the user is not in.
+// Leave gives up both the queue the user behind token waits in and the room
+// they hold, so that they can queue again. It is not an error to leave when
+// there is neither.
+//
+// Releasing the room here does not end the conversation: that happens in the
+// chat module once the participants are gone for longer than the rejoin
+// grace, and the reasoning is in
+// docs/adr/0011-end-a-conversation-after-a-rejoin-grace.md.
 func (s *Service) Leave(ctx context.Context, token string) error {
 	if err := s.store.Remove(ctx, token); err != nil {
 		return fmt.Errorf("remove from queue: %w", err)
+	}
+	if err := s.store.Discard(ctx, []string{token}); err != nil {
+		return fmt.Errorf("release room: %w", err)
 	}
 	return nil
 }
