@@ -1,10 +1,10 @@
-// ブラウザから見た API のオリジン。セッション Cookie を送るため、fetch には
+// ブラウザから見たAPIのオリジン。セッションCookieを送るため、fetchには
 // credentials: "include" が必要になる。
 export function apiBaseUrl(): string {
   return process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080";
 }
 
-// ApiError はステータスコードを呼び出し側に渡す。表示する文言は画面側が決める。
+// ApiErrorはステータスコードを呼び出し側に渡す。表示する文言は画面側が決める。
 export class ApiError extends Error {
   readonly status: number;
   readonly retryAfterSeconds: number | null;

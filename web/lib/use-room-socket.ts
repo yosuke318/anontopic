@@ -27,11 +27,11 @@ const sendTimeoutMs = 10000;
 
 export type RoomStatus = "connecting" | "open" | "reconnecting" | "ended" | "unavailable";
 
-// OutgoingFailure は送信が確認されなかった理由。timeout はサーバーから何も返って
-// こなかったもので、それ以外はサーバーが返した error の code。
+// OutgoingFailureは送信が確認されなかった理由。timeoutはサーバーから何も返って
+// こなかったもので、それ以外はサーバーが返したerrorのcode。
 export type OutgoingFailure = RoomErrorCode | "timeout";
 
-// NoticeKind は部屋の出来事のうち、発言でも入退室でもないもの。
+// NoticeKindは部屋の出来事のうち、発言でも入退室でもないもの。
 export type NoticeKind = "reconnected" | RoomErrorCode;
 
 type Identified = { id: string };
@@ -90,9 +90,9 @@ function append(state: RoomState, item: NewItem): RoomState {
   };
 }
 
-// confirmSent は返ってきた自分の発言を、送信中のものと結びつけて消す。
+// confirmSentは返ってきた自分の発言を、送信中のものと結びつけて消す。
 //
-// 部屋に流れるメッセージは送ったフレームを指す ID を持たないため、同じ本文で
+// 部屋に流れるメッセージは送ったフレームを指すIDを持たないため、同じ本文で
 // まだ確認されていないもののうち最も古いものを、その発言として扱う。
 function confirmSent(state: RoomState, participant: number, body: string): RoomState {
   if (participant !== state.self) {
@@ -109,11 +109,11 @@ function confirmSent(state: RoomState, participant: number, body: string): RoomS
   return { ...state, timeline: state.timeline.filter((_, index) => index !== at) };
 }
 
-// failSending は受け付けられなかったフレームに理由を付ける。
+// failSendingは受け付けられなかったフレームに理由を付ける。
 //
-// error もどのフレームへの返答かを持たない。サーバーは 1 つの接続のフレームを
+// errorもどのフレームへの返答かを持たない。サーバーは1つの接続のフレームを
 // 順に読むため、まだ確認されていない最も古い送信が断られたものにあたる。送信中の
-// ものが無い error は、部屋そのものが扱えなかったことを指す。
+// ものが無いerrorは、部屋そのものが扱えなかったことを指す。
 function failSending(state: RoomState, code: RoomErrorCode): RoomState {
   const at = state.timeline.findIndex((item) => item.kind === "outgoing" && item.failure === null);
   if (at < 0) {
@@ -216,13 +216,13 @@ function reduce(state: RoomState, action: Action): RoomState {
 }
 
 export type RoomSocket = RoomState & {
-  // send はメッセージを送り、フレームを出せたかどうかを返す。
+  // sendはメッセージを送り、フレームを出せたかどうかを返す。
   send: (body: string) => boolean;
   resend: (id: string, body: string) => void;
   discard: (id: string) => void;
-  // disconnect は接続を閉じ、つなぎ直しもやめる。
+  // disconnectは接続を閉じ、つなぎ直しもやめる。
   disconnect: () => void;
-  // retry は諦めた接続をもう一度試す。
+  // retryは諦めた接続をもう一度試す。
   retry: () => void;
 };
 
@@ -230,7 +230,7 @@ function reconnectDelayMs(attempt: number): number {
   return Math.min(reconnectBaseDelayMs * 2 ** (attempt - 1), reconnectMaxDelayMs);
 }
 
-// useRoomSocket は会話につないだ WebSocket を持ち、部屋の流れを組み立てる。
+// useRoomSocketは会話につないだWebSocketを持ち、部屋の流れを組み立てる。
 export function useRoomSocket(conversationId: string): RoomSocket {
   const [state, dispatch] = useReducer(reduce, initialState);
   const [generation, setGeneration] = useState(0);
@@ -274,7 +274,7 @@ export function useRoomSocket(conversationId: string): RoomSocket {
 
       socket.onclose = () => {
         // 閉じたのが今つないでいる接続とは限らない。すでに次の接続に張り替えた後の
-        // close で、その接続を手放さないようにする。
+        // closeで、その接続を手放さないようにする。
         if (socketRef.current === socket) {
           socketRef.current = null;
         }

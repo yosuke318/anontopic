@@ -9,7 +9,7 @@ import { fetchTopics, type Topic } from "@/lib/topics";
 const lead =
   "トピックと人数を選ぶと、同じトピックを選んだ人を待つ画面に移ります。会員登録はいりません。";
 
-// トピックは管理 API から変えられるため、ビルド時ではなくリクエストごとに読む。
+// トピックは管理APIから変えられるため、ビルド時ではなくリクエストごとに読む。
 export const dynamic = "force-dynamic";
 
 const description =

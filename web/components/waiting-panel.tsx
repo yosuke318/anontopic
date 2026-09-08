@@ -51,7 +51,7 @@ function topicLabel(topicName: string | undefined): string {
   return topicName === undefined ? "選んだトピック" : `「${topicName}」`;
 }
 
-// elapsedSince は待機を始めてからの時間を返す。時刻として読めない値には null を返し、
+// elapsedSinceは待機を始めてからの時間を返す。時刻として読めない値にはnullを返し、
 // 経過時間そのものを表示しない扱いにする。
 function elapsedSince(waitingSince: string | undefined, now: number): number | null {
   if (waitingSince === undefined) {
