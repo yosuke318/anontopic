@@ -1,5 +1,5 @@
-// Package report owns user-submitted reports of other participants and
-// the review workflow attached to them.
+// Package report owns user-submitted reports of conversations and the
+// review workflow attached to them.
 //
 // A report names a conversation, not a person: participants are anonymous to
 // each other and are only told apart by a number that means nothing outside
@@ -76,7 +76,7 @@ type SessionAuthenticator interface {
 	Authenticate(r *http.Request) (string, error)
 }
 
-// Service takes the reports participants file.
+// Service takes the reports participants file against a conversation.
 type Service struct {
 	repo  Repository
 	rooms Participation
