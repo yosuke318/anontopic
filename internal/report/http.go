@@ -46,6 +46,12 @@ func (h *Handler) handleSubmit(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
+	// A missing conversation id would otherwise read as reporting a stranger's
+	// conversation, and answer 403 instead of naming the client's mistake.
+	if req.ConversationID == "" || req.Reason == "" {
+		http.Error(w, "conversation_id and reason are required", http.StatusBadRequest)
+		return
+	}
 
 	switch err := h.svc.Submit(r.Context(), req.ConversationID, token, req.Reason); {
 	case err == nil:

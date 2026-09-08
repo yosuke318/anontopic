@@ -190,6 +190,26 @@ func TestEndpointAnswersAnUnknownFieldWithBadRequest(t *testing.T) {
 	}
 }
 
+func TestEndpointAnswersAMissingRequiredFieldWithBadRequest(t *testing.T) {
+	svc, _ := newTestService(map[string][]string{testConversation: {testToken}})
+	mux := newTestMux(svc)
+
+	tests := map[string]string{
+		"missing conversation_id": `{"reason":"` + ReasonOther + `"}`,
+		"empty conversation_id":   `{"conversation_id":"","reason":"` + ReasonOther + `"}`,
+		"missing reason":          `{"conversation_id":"` + testConversation + `"}`,
+		"empty reason":            `{"conversation_id":"` + testConversation + `","reason":""}`,
+	}
+	for name, body := range tests {
+		t.Run(name, func(t *testing.T) {
+			rec := do(mux, body)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+			}
+		})
+	}
+}
+
 func TestEndpointAnswersARequestWithoutASessionWithUnauthorized(t *testing.T) {
 	svc, _ := newTestService(map[string][]string{testConversation: {testToken}})
 

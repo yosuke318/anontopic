@@ -246,6 +246,11 @@ export function useRoomSocket(conversationId: string): RoomSocket {
     let attempt = 0;
     let opened = false;
 
+    // 新しい接続世代を始めるたびに、前の世代が残した状態を引き継がない。退出・終了は
+    // その世代限りの事実で、会話が変わったりretry()で世代が進んだりすれば有効ではない。
+    leftRef.current = false;
+    endedRef.current = false;
+
     function connect() {
       dispatch({ type: "status", status: attempt === 0 ? "connecting" : "reconnecting" });
 
@@ -253,13 +258,17 @@ export function useRoomSocket(conversationId: string): RoomSocket {
       socketRef.current = socket;
 
       socket.onopen = () => {
+        if (cancelled) {
+          socket.close();
+          return;
+        }
         attempt = 0;
         opened = true;
         dispatch({ type: "status", status: "open" });
       };
 
       socket.onmessage = (message) => {
-        if (typeof message.data !== "string") {
+        if (cancelled || typeof message.data !== "string") {
           return;
         }
         const event = parseRoomEvent(message.data);
@@ -318,7 +327,12 @@ export function useRoomSocket(conversationId: string): RoomSocket {
     if (socket === null || socket.readyState !== WebSocket.OPEN) {
       return false;
     }
-    socket.send(clientFrame(body));
+    try {
+      socket.send(clientFrame(body));
+    } catch {
+      // 送信の直前に接続が閉じることがある。呼び出し側には送れなかったとして返す。
+      return false;
+    }
     return true;
   }, []);
 
@@ -351,8 +365,9 @@ export function useRoomSocket(conversationId: string): RoomSocket {
     socketRef.current = null;
   }, []);
 
+  // retryは接続世代を1つ進める。leftRef/endedRefのリセットは、新しい世代の
+  // useEffectが担う。
   const retry = useCallback(() => {
-    leftRef.current = false;
     setGeneration((value) => value + 1);
   }, []);
 
