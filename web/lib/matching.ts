@@ -15,7 +15,7 @@ export type MatchingState = {
   };
 };
 
-// issueSession は匿名セッションを用意する。すでに有効な Cookie があれば期限だけ延びる。
+// issueSessionは匿名セッションを用意する。すでに有効なCookieがあれば期限だけ延びる。
 export async function issueSession(): Promise<void> {
   const res = await fetch(`${apiBaseUrl()}/api/session`, {
     method: "POST",
@@ -26,7 +26,7 @@ export async function issueSession(): Promise<void> {
   }
 }
 
-// joinQueue は待機キューに入る。人数が揃っていればその場でルームが成立する。
+// joinQueueは待機キューに入る。人数が揃っていればその場でルームが成立する。
 export async function joinQueue(topicId: number, roomType: RoomType): Promise<MatchingState> {
   const res = await fetch(`${apiBaseUrl()}/api/matching`, {
     method: "POST",
@@ -40,7 +40,7 @@ export async function joinQueue(topicId: number, roomType: RoomType): Promise<Ma
   return (await res.json()) as MatchingState;
 }
 
-// readMatchingState は待機の状態を読む。どのキューにもいない場合は null を返す。
+// readMatchingStateは待機の状態を読む。どのキューにもいない場合はnullを返す。
 export async function readMatchingState(): Promise<MatchingState | null> {
   const res = await fetch(`${apiBaseUrl()}/api/matching`, {
     credentials: "include",
@@ -55,7 +55,7 @@ export async function readMatchingState(): Promise<MatchingState | null> {
   return (await res.json()) as MatchingState;
 }
 
-// leaveQueue は待機をやめる。成立済みのルームは取り消さない。
+// leaveQueueは待機をやめる。成立済みのルームは取り消さない。
 export async function leaveQueue(): Promise<void> {
   const res = await fetch(`${apiBaseUrl()}/api/matching`, {
     method: "DELETE",

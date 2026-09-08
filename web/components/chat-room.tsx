@@ -79,7 +79,7 @@ function formatTime(sentAt: string): string {
   return `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`;
 }
 
-// roomTypeOf は次に入るキューの人数を決める。3 人ルームで待っていても 2 人で成立する
+// roomTypeOfは次に入るキューの人数を決める。3人ルームで待っていても2人で成立する
 // ことがあるため、いま居るルームの人数をそのまま引き継ぐ。
 function roomTypeOf(roomType: number): RoomType {
   return roomType === 3 ? 3 : 2;
@@ -147,7 +147,7 @@ export function ChatRoom({ conversationId, topics }: { conversationId: string; t
   }
 
   // ブロックはこの画面の中だけで持ち、サーバーには送らない。相手にも伝わらない。
-  // 理由は docs/adr/0016-block-a-participant-in-the-browser-only.md にある。
+  // 理由はdocs/adr/0016-block-a-participant-in-the-browser-only.mdにある。
   function toggleBlock(participant: number) {
     setBlocked((current) =>
       current.includes(participant)
@@ -156,7 +156,7 @@ export function ChatRoom({ conversationId, topics }: { conversationId: string; t
     );
   }
 
-  // leave は接続を閉じ、待機の割り当ても返す。会話そのものは、参加者が居なくなって
+  // leaveは接続を閉じ、待機の割り当ても返す。会話そのものは、参加者が居なくなって
   // から猶予を過ぎたときにサーバー側で終わる。
   async function leave(next: "topics" | "queue") {
     setLeaving(true);
@@ -197,7 +197,7 @@ export function ChatRoom({ conversationId, topics }: { conversationId: string; t
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    // 変換中の Enter は確定なので、送信に使わない。
+    // 変換中のEnterは確定なので、送信に使わない。
     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) {
       return;
     }
