@@ -3,7 +3,8 @@
 import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
 
-import { ApiError, issueSession, joinQueue, roomTypes, type RoomType } from "@/lib/matching";
+import { ApiError } from "@/lib/api";
+import { issueSession, joinQueue, roomTypes, type RoomType } from "@/lib/matching";
 import type { Topic } from "@/lib/topics";
 
 const roomTypeHint = "3 人が揃わないときは、しばらく待ってから 2 人で始まります。";

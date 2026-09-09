@@ -114,7 +114,7 @@ curl -X POST localhost:8080/api/session -c cookie.txt   # 先にセッション�
 curl -X POST -b cookie.txt -H 'Content-Type: application/json' \
   -d '{"topic_id":1,"room_type":2}' localhost:8080/api/matching   # 待機に入る
 curl -b cookie.txt localhost:8080/api/matching                     # 状態を問い合わせる
-curl -X DELETE -b cookie.txt localhost:8080/api/matching           # 待機をやめる
+curl -X DELETE -b cookie.txt localhost:8080/api/matching           # 待機とルームの割り当てを手放す
 ```
 
 `POST` は成立すれば200、待機のままなら202を返す。待機中のクライアントは `GET` を
@@ -147,6 +147,23 @@ curl -X DELETE -b cookie.txt localhost:8080/api/matching           # 待機を�
 [ADR-0010](docs/adr/0010-split-the-conversation-tables-by-lifecycle-phase.md) にある。
 
 やり取りするフレームの形式は [docs/openapi.yaml](docs/openapi.yaml) に書いてある。
+
+### 通報
+
+参加した会話は `POST /api/reports` で通報できる。参加者は互いに匿名で、部屋の中の
+参加者番号は部屋の外では意味を持たないため、通報の対象は相手ではなく会話そのものになる。
+理由は [ADR-0015](docs/adr/0015-report-a-conversation-rather-than-a-participant.md) にある。
+
+```bash
+curl -X POST -b cookie.txt -H 'Content-Type: application/json' \
+  -d '{"conversation_id":"<会話 ID>","reason":"contact"}' localhost:8080/api/reports
+```
+
+`reason` は `sexual` / `contact` / `harassment` / `spam` / `other` のいずれか。通報できるのは
+その会話の参加者だけで、参加していない会話と存在しない会話は区別せず 403 を返す。会話が
+終わった後も通報できる。同じ会話を同じ通報者が繰り返し通報しても記録は増えない。
+
+通報を読むための管理画面と、通報が重なった利用者への制裁はまだ実装していない。
 
 ### 接続数の上限とレート制限
 
@@ -205,9 +222,18 @@ APIサーバーの設定は環境変数で行う。
 | `/about` | 静的生成 | 紹介ページ。使い方、ルーム種別、禁止事項、よくある質問 |
 | `/topics` | リクエストごと | トピックとルーム種別の選択。`GET /api/topics` の結果をサーバーで埋める |
 | `/waiting` | リクエストごと | 待機画面。`GET /api/matching` を2秒ごとに読んで成立を待つ |
+| `/rooms/[roomID]` | リクエストごと | チャットルーム。描画と通信はブラウザ側で行い、`/ws/rooms/{roomID}` につなぐ |
+
+チャットルームだけはサイトのヘッダー・フッターを持たず、画面いっぱいを使う。
+共通のヘッダーとフッターは `SiteChrome` にまとめてあり、それを使わない唯一の経路になる。
+
+ブロックはブラウザの中だけで持ち、サーバーには送らない。理由は
+[ADR-0016](docs/adr/0016-block-a-participant-in-the-browser-only.md) にある。
 
 `sitemap.xml` / `robots.txt` / OGP画像 / faviconは `web/app/` のNext.jsの
 ファイル規約で生成する。`/waiting` はセッションを持つ人にしか意味がないため、
+`sitemap.xml` / `robots.txt` / OGP 画像 / favicon は `web/app/` の Next.js の
+ファイル規約で生成する。`/waiting` と `/rooms/` はセッションを持つ人にしか意味がないため、
 `robots.txt` でクロール対象から外している。
 
 フロントエンドの設定は環境変数で行う。`NEXT_PUBLIC_` が付く値はブラウザに配られる。

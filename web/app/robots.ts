@@ -7,8 +7,8 @@ export default function robots(): MetadataRoute.Robots {
     rules: {
       userAgent: "*",
       allow: "/",
-      // 待機画面はセッションを持つ人にしか意味がなく、内容も毎回変わる。
-      disallow: "/waiting",
+      // 待機画面と会話はセッションを持つ人にしか意味がなく、内容も毎回変わる。
+      disallow: ["/waiting", "/rooms/"],
     },
     sitemap: absoluteUrl("/sitemap.xml"),
   };

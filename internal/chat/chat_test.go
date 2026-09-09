@@ -302,6 +302,37 @@ func TestAdmitRefusesAnyoneTheConversationWasNotFormedFor(t *testing.T) {
 	}
 }
 
+func TestIsParticipantAnswersForConversationsThatAreOver(t *testing.T) {
+	repo := newFakeRepository(tokenAlice, tokenBob)
+	svc := NewService(repo, newFakeStore(), nil, nil, testOptions())
+	ctx := context.Background()
+
+	if _, err := repo.End(ctx, repo.conv.ID, endReasonUserLeft, time.Now().UTC()); err != nil {
+		t.Fatalf("end the conversation: %v", err)
+	}
+
+	tests := map[string]struct {
+		conversationID string
+		token          string
+		want           bool
+	}{
+		"a participant":           {conversationID: repo.conv.ID, token: tokenAlice, want: true},
+		"a stranger":              {conversationID: repo.conv.ID, token: "someone-elses-token"},
+		"an unknown conversation": {conversationID: "1c8f", token: tokenAlice},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			got, err := svc.IsParticipant(ctx, tc.conversationID, tc.token)
+			if err != nil {
+				t.Fatalf("IsParticipant: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("IsParticipant = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestNumbersOfNamesParticipantsByTheirPlaceInTheConversation(t *testing.T) {
 	conv := Conversation{Participants: []string{"first", "second", "third"}}
 

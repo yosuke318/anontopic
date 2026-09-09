@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import type { Metadata } from "next";
 
+import { SiteChrome } from "@/components/site-chrome";
 import { TopicPicker } from "@/components/topic-picker";
 import { siteName } from "@/lib/site";
 import { fetchTopics, type Topic } from "@/lib/topics";
@@ -8,7 +9,7 @@ import { fetchTopics, type Topic } from "@/lib/topics";
 const lead =
   "トピックと人数を選ぶと、同じトピックを選んだ人を待つ画面に移ります。会員登録はいりません。";
 
-// トピックは管理 API から変えられるため、ビルド時ではなくリクエストごとに読む。
+// トピックは管理APIから変えられるため、ビルド時ではなくリクエストごとに読む。
 export const dynamic = "force-dynamic";
 
 const description =
@@ -89,14 +90,16 @@ async function Picker() {
 
 export default function TopicsPage() {
   return (
-    <div className="mx-auto w-full max-w-3xl px-5 py-16">
-      <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">何について話しますか</h1>
-      <p className="text-muted mt-6 leading-8">{lead}</p>
-      <div className="mt-12">
-        <Suspense fallback={<PickerSkeleton />}>
-          <Picker />
-        </Suspense>
+    <SiteChrome>
+      <div className="mx-auto w-full max-w-3xl px-5 py-16">
+        <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">何について話しますか</h1>
+        <p className="text-muted mt-6 leading-8">{lead}</p>
+        <div className="mt-12">
+          <Suspense fallback={<PickerSkeleton />}>
+            <Picker />
+          </Suspense>
+        </div>
       </div>
-    </div>
+    </SiteChrome>
   );
 }
