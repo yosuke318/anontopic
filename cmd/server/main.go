@@ -111,6 +111,10 @@ func run() error {
 
 	chats := newChatService(pool, rdb, limits)
 
+	// Only a participant of a conversation may report it, and the chat module
+	// is what knows who those are.
+	reports := report.NewService(report.NewPostgresRepository(pool), chats)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", handleHealth)
 	mux.HandleFunc("GET /readyz", handleReady(pool, rdb))
@@ -118,6 +122,7 @@ func run() error {
 	chat.NewHandler(chats, sessions, limits, allowedOrigins).Register(mux)
 	topic.NewHandler(topics, adminToken).Register(mux)
 	matching.NewHandler(matches, sessions).Register(mux)
+	report.NewHandler(reports, sessions).Register(mux)
 
 	srv := &http.Server{
 		Addr:              addr,

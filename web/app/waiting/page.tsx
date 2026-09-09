@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 
+import { SiteChrome } from "@/components/site-chrome";
 import { WaitingPanel } from "@/components/waiting-panel";
 import { fetchTopics, type Topic } from "@/lib/topics";
 
@@ -21,8 +22,10 @@ export default async function WaitingPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-2xl px-5 py-16">
-      <WaitingPanel topics={topics} />
-    </div>
+    <SiteChrome>
+      <div className="mx-auto w-full max-w-2xl px-5 py-16">
+        <WaitingPanel topics={topics} />
+      </div>
+    </SiteChrome>
   );
 }

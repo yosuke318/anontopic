@@ -82,7 +82,7 @@ INSERT INTO reports (conversation_id, reporter_token, reason, status, created_at
 SELECT
     '22222222-2222-2222-2222-222222222222'::uuid,
     'devseed-conv2-participant-a',
-    '規約違反の疑い',
+    'harassment',
     'open',
     now() - interval '1 day' + interval '6 minutes'
 WHERE NOT EXISTS (
