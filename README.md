@@ -135,9 +135,8 @@ curl -X DELETE -b cookie.txt localhost:8080/api/matching           # 待機と�
 つないでいても届く。参加者はセッショントークンではなく会話ごとの番号（1起点）で表し、
 トークンが他の参加者に渡ることはない。
 
-送信前にモデレーションの判定を挟む口を用意してあり、ブロックされたメッセージは相手に届かず、
-送信者にだけ `{"type":"error","code":"blocked"}` が返る。判定を行うmoderationモジュールは
-まだ配線していないため、現状はすべてのメッセージがそのまま配送される（起動時に警告を出す）。
+送信前にモデレーションの判定を挟む。ブロックされたメッセージは相手に届かず、送信者にだけ
+`{"type":"error","code":"blocked"}` が返る。
 
 片方が切断すると、残った参加者にはすぐ退出が伝わる。接続中の参加者が1人以下のまま
 `CHAT_REJOIN_GRACE` を過ぎると会話が終了し、`conversations.ended_at` と `end_reason` に
@@ -147,6 +146,26 @@ curl -X DELETE -b cookie.txt localhost:8080/api/matching           # 待機と�
 [ADR-0010](docs/adr/0010-split-the-conversation-tables-by-lifecycle-phase.md) にある。
 
 やり取りするフレームの形式は [docs/openapi.yaml](docs/openapi.yaml) に書いてある。
+
+### モデレーション
+
+メッセージは部屋に流れる前に一次フィルタを通る。判定に使うのは `ng_words` のNGワード辞書と、
+外部連絡先（URL・メールアドレス・電話番号・アカウント名）の正規表現で、AI判定は使わない。
+
+辞書は起動時にメモリへ読み込み、`MODERATION_RELOAD_INTERVAL` ごとに読み直す。SQLで語を足したり
+`is_active` を落としたりした結果が反映されるまで、最大でこの間隔ぶん遅れる。理由は
+[ADR-0004](docs/adr/0004-ng-word-dictionary-in-database.md) にある。
+
+判定の前にメッセージは1つの形に畳み込むため、ひらがな／カタカナ／全角半角の書き換え、文字の間に
+挟んだ記号、内側1文字の伏字では抜けられない。畳み込みの内容と限界は
+[ADR-0017](docs/adr/0017-fold-a-message-into-one-form-before-matching-it.md) にある。
+
+ブロックしたメッセージは部屋には流さないが、`messages` に `moderation_flag = 1` で記録する。
+誤検知を直す材料と、繰り返し違反を数える材料がここに残る。理由は
+[ADR-0018](docs/adr/0018-record-the-messages-the-filter-blocked.md) にある。
+
+辞書をまだ一度も読めていない間は、メッセージを配らずに `{"type":"error","code":"unavailable"}`
+を返す。判定できないものを素通しにしないため。
 
 ### 通報
 
@@ -201,6 +220,7 @@ APIサーバーの設定は環境変数で行う。
 | `MATCHING_WAIT_TTL` | `5m` | 待機キューに並び続けられる時間。超えた利用者はキューから外れる |
 | `MATCHING_FALLBACK_AFTER` | `60s` | 3人ルームの待機がこの時間を超えたら2人で成立させる |
 | `CHAT_REJOIN_GRACE` | `30s` | 切断した参加者を待つ時間。接続中が1人以下のままこの時間を超えると会話を終了する |
+| `MODERATION_RELOAD_INTERVAL` | `5m` | NGワード辞書を読み直す間隔。辞書の変更が反映されるまでの最大の遅れになる |
 | `CAPACITY_MAX_CONNECTIONS` | `1000` | 全サーバー合計で同時に持つWebSocket接続の上限。達している間は新規接続を503で拒否する |
 | `CAPACITY_MAX_CONNECTIONS_PER_IP` | `5` | 1つのIPハッシュが同時に持てる接続数。超えた接続は429で拒否する |
 | `CAPACITY_LEASE_TTL` | `30s` | 接続がリースを持ち続ける時間。更新が止まったリースはこの時間で切れ、数から外れる |

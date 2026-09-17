@@ -63,7 +63,8 @@ operations:
       間隔は [openapi.yaml](openapi.yaml) の `/ws/rooms/{roomID}` に書いてある。
 
       受け取った本文はモデレーションにかけ、ブロックされたものは誰にも配らず送信者に
-      `blocked` を返す。配るものは保存のために受け付けてから部屋に流す。
+      `blocked` を返す。ブロックされた本文も `moderation_flag` を立てて保存する。
+      配るものは保存のために受け付けてから部屋に流す。
     messages:
       - $ref: "#/channels/room/messages/clientMessage"
 

@@ -55,6 +55,8 @@ services:
       # 上限に達したときの挙動を、1,000 本つながずに確かめられるようにしておく。
       CAPACITY_MAX_CONNECTIONS: ${CAPACITY_MAX_CONNECTIONS:-1000}
       CAPACITY_MAX_CONNECTIONS_PER_IP: ${CAPACITY_MAX_CONNECTIONS_PER_IP:-5}
+      # 辞書を SQL で直しながら確かめられるよう、読み直す間隔を .env から縮められるようにする。
+      MODERATION_RELOAD_INTERVAL: ${MODERATION_RELOAD_INTERVAL:-5m}
       # 既定値を持たせない。値を渡さない限り管理エンドポイントは登録されないため、
       # .env を置いていない環境が推測できるトークンで書き込み口を開けることがない。
       ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:-}

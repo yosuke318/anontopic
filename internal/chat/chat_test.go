@@ -178,7 +178,7 @@ func TestConnectingAgainKeepsOneParticipant(t *testing.T) {
 	}
 }
 
-func TestABlockedMessageIsAnsweredWithoutReachingTheRoom(t *testing.T) {
+func TestABlockedMessageIsAnsweredAndRecordedWithoutReachingTheRoom(t *testing.T) {
 	repo := newFakeRepository(tokenAlice, tokenBob)
 	store := newFakeStore()
 
@@ -209,11 +209,17 @@ func TestABlockedMessageIsAnsweredWithoutReachingTheRoom(t *testing.T) {
 		t.Fatalf("body = %q, want %q", ev.Body, "こんばんは")
 	}
 
-	// The blocked message was sent first, so it would have been recorded
-	// first: one message means it reached neither the room nor the database.
-	recorded := awaitRecorded(t, repo, 1)
-	if len(recorded) != 1 || recorded[0].body != "こんばんは" {
-		t.Fatalf("recorded %+v, want the message that was not blocked alone", recorded)
+	// Both messages are recorded, in the order they were sent, and the one
+	// the room never saw carries the flag the moderator stopped it with.
+	recorded := awaitRecorded(t, repo, 2)
+	if len(recorded) != 2 {
+		t.Fatalf("recorded %+v, want both messages", recorded)
+	}
+	if recorded[0].body != blocked || recorded[0].flag != moderationFlagNG {
+		t.Fatalf("recorded %+v, want %q with flag %d", recorded[0], blocked, moderationFlagNG)
+	}
+	if recorded[1].body != "こんばんは" || recorded[1].flag != moderationFlagClean {
+		t.Fatalf("recorded %+v, want %q with flag %d", recorded[1], "こんばんは", moderationFlagClean)
 	}
 }
 

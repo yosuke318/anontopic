@@ -119,7 +119,8 @@ const (
 	DecisionAllow Decision = iota
 	// DecisionFlag delivers the message and records the flag on it.
 	DecisionFlag
-	// DecisionBlock keeps the message from the room and tells its sender.
+	// DecisionBlock keeps the message from the room and tells its sender. The
+	// message is recorded with the flag on it all the same.
 	DecisionBlock
 )
 
@@ -450,18 +451,12 @@ func (s *Service) sendMessage(ctx context.Context, c *conn, body string) {
 		c.send(errorEvent(codeUnavailable, "the message could not be checked"))
 		return
 	}
-	if decision == DecisionBlock {
-		c.send(errorEvent(codeBlocked, "the message was not delivered"))
-		return
-	}
 
 	flag := moderationFlagClean
-	if decision == DecisionFlag {
+	if decision != DecisionAllow {
 		flag = moderationFlagNG
 	}
 
-	// The message is taken for recording before the room reads it, so that a
-	// message the server cannot keep is not delivered either.
 	msg := Message{
 		ConversationID: c.conversationID,
 		SenderToken:    c.token,
@@ -469,6 +464,23 @@ func (s *Service) sendMessage(ctx context.Context, c *conn, body string) {
 		Flag:           flag,
 		CreatedAt:      s.now().UTC(),
 	}
+
+	if decision == DecisionBlock {
+		// A message the room never sees is recorded all the same, and the
+		// sender is told the same thing whether or not it could be. The
+		// reasoning is in
+		// docs/adr/0018-record-the-messages-the-filter-blocked.md.
+		if err := s.writer.add(ctx, msg); err != nil {
+			slog.Error("record blocked message",
+				slog.String("conversation_id", c.conversationID), slog.Any("error", err))
+		}
+
+		c.send(errorEvent(codeBlocked, "the message was not delivered"))
+		return
+	}
+
+	// The message is taken for recording before the room reads it, so that a
+	// message the server cannot keep is not delivered either.
 	if err := s.writer.add(ctx, msg); err != nil {
 		slog.Error("record message",
 			slog.String("conversation_id", c.conversationID), slog.Any("error", err))
