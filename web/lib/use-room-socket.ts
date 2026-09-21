@@ -6,6 +6,7 @@ import {
   clientFrame,
   parseRoomEvent,
   roomSocketUrl,
+  type BlockReason,
   type RoomConversation,
   type RoomErrorCode,
   type RoomEvent,
@@ -44,6 +45,8 @@ type OutgoingItem = {
   body: string;
   startedAt: number;
   failure: OutgoingFailure | null;
+  // blockReasonはfailureがblockedのときに、サーバーが返した止めた理由。
+  blockReason: BlockReason | null;
 };
 
 type NewItem = MessageItem | PresenceItem | NoticeItem | OutgoingItem;
@@ -114,7 +117,11 @@ function confirmSent(state: RoomState, participant: number, body: string): RoomS
 // errorもどのフレームへの返答かを持たない。サーバーは1つの接続のフレームを
 // 順に読むため、まだ確認されていない最も古い送信が断られたものにあたる。送信中の
 // ものが無いerrorは、部屋そのものが扱えなかったことを指す。
-function failSending(state: RoomState, code: RoomErrorCode): RoomState {
+function failSending(
+  state: RoomState,
+  code: RoomErrorCode,
+  blockReason: BlockReason | null,
+): RoomState {
   const at = state.timeline.findIndex((item) => item.kind === "outgoing" && item.failure === null);
   if (at < 0) {
     return append(state, { kind: "notice", notice: code });
@@ -123,7 +130,7 @@ function failSending(state: RoomState, code: RoomErrorCode): RoomState {
   return {
     ...state,
     timeline: state.timeline.map((item, index) =>
-      index === at && item.kind === "outgoing" ? { ...item, failure: code } : item,
+      index === at && item.kind === "outgoing" ? { ...item, failure: code, blockReason } : item,
     ),
   };
 }
@@ -160,7 +167,7 @@ function applyEvent(state: RoomState, event: RoomEvent): RoomState {
     case "ended":
       return { ...state, status: "ended", endReason: event.reason, present: [] };
     case "error":
-      return failSending(state, event.code);
+      return failSending(state, event.code, event.reason);
   }
 }
 
@@ -185,13 +192,14 @@ function reduce(state: RoomState, action: Action): RoomState {
         body: action.body,
         startedAt: action.at,
         failure: null,
+        blockReason: null,
       });
     case "resent":
       return {
         ...state,
         timeline: state.timeline.map((item) =>
           item.id === action.id && item.kind === "outgoing"
-            ? { ...item, startedAt: action.at, failure: null }
+            ? { ...item, startedAt: action.at, failure: null, blockReason: null }
             : item,
         ),
       };

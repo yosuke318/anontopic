@@ -178,16 +178,16 @@ func TestConnectingAgainKeepsOneParticipant(t *testing.T) {
 	}
 }
 
-func TestABlockedMessageIsAnsweredWithoutReachingTheRoom(t *testing.T) {
+func TestABlockedMessageIsAnsweredAndRecordedWithoutReachingTheRoom(t *testing.T) {
 	repo := newFakeRepository(tokenAlice, tokenBob)
 	store := newFakeStore()
 
 	blocked := "会いませんか"
-	moderator := moderatorFunc(func(_ context.Context, body string) (Decision, error) {
+	moderator := moderatorFunc(func(_ context.Context, body string) (Verdict, error) {
 		if body == blocked {
-			return DecisionBlock, nil
+			return Verdict{Decision: DecisionBlock, Reason: "meetup"}, nil
 		}
-		return DecisionAllow, nil
+		return Verdict{Decision: DecisionAllow}, nil
 	})
 	srv := newTestServer(t, repo, store, moderator, nil, testOptions(), tokenAlice, tokenBob)
 
@@ -199,8 +199,10 @@ func TestABlockedMessageIsAnsweredWithoutReachingTheRoom(t *testing.T) {
 	send(t, alice, clientFrame{Type: frameMessage, Body: blocked})
 	send(t, alice, clientFrame{Type: frameMessage, Body: "こんばんは"})
 
-	if ev, _ := await(t, alice, eventError); ev.Code != codeBlocked {
-		t.Fatalf("code = %q, want %q", ev.Code, codeBlocked)
+	// The sender is told what the message was blocked for, as the moderator
+	// put it.
+	if ev, _ := await(t, alice, eventError); ev.Code != codeBlocked || ev.Reason != "meetup" {
+		t.Fatalf("code, reason = %q, %q, want %q, %q", ev.Code, ev.Reason, codeBlocked, "meetup")
 	}
 
 	// The message the room does receive is the one that was not blocked, so
@@ -209,11 +211,17 @@ func TestABlockedMessageIsAnsweredWithoutReachingTheRoom(t *testing.T) {
 		t.Fatalf("body = %q, want %q", ev.Body, "こんばんは")
 	}
 
-	// The blocked message was sent first, so it would have been recorded
-	// first: one message means it reached neither the room nor the database.
-	recorded := awaitRecorded(t, repo, 1)
-	if len(recorded) != 1 || recorded[0].body != "こんばんは" {
-		t.Fatalf("recorded %+v, want the message that was not blocked alone", recorded)
+	// Both messages are recorded, in the order they were sent, and the one
+	// the room never saw carries the flag the moderator stopped it with.
+	recorded := awaitRecorded(t, repo, 2)
+	if len(recorded) != 2 {
+		t.Fatalf("recorded %+v, want both messages", recorded)
+	}
+	if recorded[0].body != blocked || recorded[0].flag != moderationFlagNG {
+		t.Fatalf("recorded %+v, want %q with flag %d", recorded[0], blocked, moderationFlagNG)
+	}
+	if recorded[1].body != "こんばんは" || recorded[1].flag != moderationFlagClean {
+		t.Fatalf("recorded %+v, want %q with flag %d", recorded[1], "こんばんは", moderationFlagClean)
 	}
 }
 
@@ -221,8 +229,8 @@ func TestAFlaggedMessageIsDeliveredAndRecordedWithItsFlag(t *testing.T) {
 	repo := newFakeRepository(tokenAlice, tokenBob)
 	store := newFakeStore()
 
-	moderator := moderatorFunc(func(_ context.Context, _ string) (Decision, error) {
-		return DecisionFlag, nil
+	moderator := moderatorFunc(func(_ context.Context, _ string) (Verdict, error) {
+		return Verdict{Decision: DecisionFlag}, nil
 	})
 	srv := newTestServer(t, repo, store, moderator, nil, testOptions(), tokenAlice)
 
