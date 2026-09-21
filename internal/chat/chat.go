@@ -88,15 +88,21 @@ const (
 	departureTimeout = 5 * time.Second
 )
 
-// The values messages.moderation_flag takes for a message this module writes.
+// The values messages.moderation_flag takes.
 const (
-	moderationFlagClean = 0
-	moderationFlagNG    = 1
+	moderationFlagClean    = 0
+	moderationFlagNG       = 1
+	moderationFlagReported = 2
 )
 
-// endReasonUserLeft is the conversations.end_reason of a conversation that
-// ran out of participants.
-const endReasonUserLeft = "user_left"
+// The values conversations.end_reason takes for a conversation this module
+// ends.
+const (
+	// endReasonUserLeft ends a conversation that ran out of participants.
+	endReasonUserLeft = "user_left"
+	// endReasonReported ends a conversation a participant reported.
+	endReasonReported = "reported"
+)
 
 var (
 	// ErrConversationNotFound is returned for a conversation that does not

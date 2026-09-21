@@ -202,6 +202,9 @@ components:
         接続中の参加者が 1 人以下のまま `CHAT_REJOIN_GRACE`（既定 30 秒）を過ぎると
         会話は終わる。理由は
         [ADR-0011](adr/0011-end-a-conversation-after-a-rejoin-grace.md) にある。
+
+        参加者の誰かが `POST /api/reports` で通報した場合も、その時点で全員に届いて終わる。
+        理由は [ADR-0021](adr/0021-end-and-keep-a-conversation-once-it-is-reported.md) にある。
       contentType: application/json
       payload:
         type: object
@@ -213,9 +216,11 @@ components:
           reason:
             type: string
             description: |
-              `conversations.end_reason` の値。参加者が居なくなった終了は `user_left`。
+              `conversations.end_reason` の値。参加者が居なくなった終了は `user_left`、
+              通報による終了は `reported`。
             examples:
               - user_left
+              - reported
 
     error:
       name: error

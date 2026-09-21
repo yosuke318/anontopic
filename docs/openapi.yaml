@@ -26,7 +26,7 @@ tags:
   - name: topic
     description: トピックの一覧と管理
   - name: report
-    description: 会話の通報
+    description: 会話の通報、権利侵害の申し立て、およびその確認と対応
 
 paths:
   /healthz:
@@ -546,6 +546,12 @@ paths:
 
         同じ会話を同じ通報者が繰り返し通報しても記録は増えない。会話に付く通報の数を、
         ボタンが押された回数ではなく通報した参加者の人数にするため。
+
+        受け付けた会話は `is_flagged` を立てて保持期間の削除から外し、通報者以外が送った
+        メッセージの `moderation_flag` を 2（通報あり）にする。進行中の会話は
+        `end_reason = reported` で終わり、参加者全員に `ended` イベントが届く。
+        どの処理も繰り返して安全なため、500 が返った通報は送り直せば完了する。理由は
+        docs/adr/0021-end-and-keep-a-conversation-once-it-is-reported.md にある。
       security:
         - sessionCookie: []
       requestBody:
@@ -578,7 +584,237 @@ paths:
         "500":
           $ref: "#/components/responses/InternalServerError"
 
+  /api/claims:
+    post:
+      tags: [report]
+      operationId: submitClaim
+      summary: 権利侵害の申し立てを送る
+      description: |
+        会話の参加者に限らず、誰でも送れる。セッションは要らない。会話は参加者どうしでしか
+        見えず、申立人は会話 ID を知り得ないため、どの会話かは `details` に書いてもらい、
+        運営が探して確認する。
+
+        セッションを要求しない代わりに、接続元の IP ハッシュごとにレートを制限する
+        （`CAPACITY_CLAIM_BURST` 件まで続けて送れ、以降は `CAPACITY_CLAIM_INTERVAL` に
+        1 件ずつ回復する）。理由は
+        docs/adr/0022-take-rights-infringement-claims-from-anyone.md にある。
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClaimSubmission"
+      responses:
+        "204":
+          description: 申し立てを受け付けた
+        "400":
+          description: リクエストボディが不正、または項目が空・長すぎる・形式が違う
+          content:
+            text/plain:
+              schema:
+                type: string
+                examples:
+                  - "report: invalid claim: email"
+        "429":
+          description: 同じ IP ハッシュから短時間に送られすぎた
+          headers:
+            Retry-After:
+              description: 次に送れるまでの秒数
+              schema:
+                type: integer
+          content:
+            text/plain:
+              schema:
+                type: string
+                examples:
+                  - too many claims
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/admin/reports:
+    get:
+      tags: [report]
+      operationId: listReports
+      summary: 通報を新しい順に返す
+      description: |
+        通報者のセッショントークンは返さない。次のページは、受け取った最後の `id` を
+        `before` に渡して読む。
+      security:
+        - adminToken: []
+      parameters:
+        - $ref: "#/components/parameters/StatusFilter"
+        - name: conversation_id
+          in: query
+          description: この会話に付いた通報だけを返す
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/BeforeID"
+        - $ref: "#/components/parameters/ListLimit"
+      responses:
+        "200":
+          description: 通報の一覧
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportList"
+        "400":
+          $ref: "#/components/responses/InvalidListQuery"
+        "401":
+          $ref: "#/components/responses/AdminUnauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/admin/reports/{id}:
+    parameters:
+      - $ref: "#/components/parameters/SubmissionID"
+
+    get:
+      tags: [report]
+      operationId: reviewReport
+      summary: 通報 1 件と、対象の会話ログを返す
+      description: |
+        参加者はルーム内の番号（1 起点）で示し、セッショントークンは返さない。
+        理由は docs/adr/0023-review-reports-through-the-admin-api.md にある。
+      security:
+        - adminToken: []
+      responses:
+        "200":
+          description: 通報と会話ログ
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportReview"
+        "400":
+          $ref: "#/components/responses/InvalidSubmissionID"
+        "401":
+          $ref: "#/components/responses/AdminUnauthorized"
+        "404":
+          $ref: "#/components/responses/SubmissionNotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    patch:
+      tags: [report]
+      operationId: updateReportStatus
+      summary: 通報の対応ステータスを変える
+      description: どのステータスからどのステータスへも変えられる。
+      security:
+        - adminToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StatusUpdate"
+      responses:
+        "200":
+          description: 変更後の通報
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Report"
+        "400":
+          $ref: "#/components/responses/InvalidStatusUpdate"
+        "401":
+          $ref: "#/components/responses/AdminUnauthorized"
+        "404":
+          $ref: "#/components/responses/SubmissionNotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/admin/claims:
+    get:
+      tags: [report]
+      operationId: listClaims
+      summary: 権利侵害の申し立てを新しい順に返す
+      security:
+        - adminToken: []
+      parameters:
+        - $ref: "#/components/parameters/StatusFilter"
+        - $ref: "#/components/parameters/BeforeID"
+        - $ref: "#/components/parameters/ListLimit"
+      responses:
+        "200":
+          description: 申し立ての一覧
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClaimList"
+        "400":
+          $ref: "#/components/responses/InvalidListQuery"
+        "401":
+          $ref: "#/components/responses/AdminUnauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/admin/claims/{id}:
+    parameters:
+      - $ref: "#/components/parameters/SubmissionID"
+
+    patch:
+      tags: [report]
+      operationId: updateClaimStatus
+      summary: 申し立ての対応ステータスを変える
+      security:
+        - adminToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StatusUpdate"
+      responses:
+        "200":
+          description: 変更後の申し立て
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Claim"
+        "400":
+          $ref: "#/components/responses/InvalidStatusUpdate"
+        "401":
+          $ref: "#/components/responses/AdminUnauthorized"
+        "404":
+          $ref: "#/components/responses/SubmissionNotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
 components:
+  parameters:
+    SubmissionID:
+      name: id
+      in: path
+      required: true
+      description: 通報ID または申し立てID
+      schema:
+        type: integer
+        minimum: 1
+
+    StatusFilter:
+      name: status
+      in: query
+      description: この対応ステータスのものだけを返す
+      schema:
+        $ref: "#/components/schemas/ReviewStatus"
+
+    BeforeID:
+      name: before
+      in: query
+      description: この ID より古いものだけを返す。前のページの最後の `id` を渡す
+      schema:
+        type: integer
+        minimum: 1
+
+    ListLimit:
+      name: limit
+      in: query
+      description: 返す件数の上限。省略時は 50、200 を超える値は 200 として扱う
+      schema:
+        type: integer
+        minimum: 1
+
   securitySchemes:
     adminToken:
       type: http
@@ -723,14 +959,206 @@ components:
           examples:
             - 7f1fca8f-ca30-40c7-a752-ef5ffa6bac2a
         reason:
-          type: string
-          description: |
-            通報の分類。`sexual` は性的な内容・出会い目的、`contact` は連絡先の交換や
-            外部への誘導、`harassment` は暴言やいやがらせ、`spam` は宣伝、
-            `other` はそれ以外
-          enum: [sexual, contact, harassment, spam, other]
+          $ref: "#/components/schemas/ReportReason"
+
+    ReportReason:
+      type: string
+      description: |
+        通報の分類。`dating` は出会い・交際目的、`sexual` は性的な内容、`contact` は
+        連絡先の交換や外部への誘導、`harassment` は誹謗中傷・暴言・いやがらせ、
+        `spam` は宣伝、`other` はそれ以外。`dating` を分ける前に記録された `sexual` には
+        出会い目的の通報も含まれる（docs/adr/0024-split-dating-out-of-the-sexual-report-reason.md）
+      enum: [dating, sexual, contact, harassment, spam, other]
+      examples:
+        - contact
+
+    ReviewStatus:
+      type: string
+      description: |
+        対応ステータス。`open` は未確認、`reviewing` は確認中、`actioned` は対応済み、
+        `rejected` は対応不要と判断したもの
+      enum: [open, reviewing, actioned, rejected]
+      examples:
+        - open
+
+    StatusUpdate:
+      type: object
+      required: [status]
+      properties:
+        status:
+          $ref: "#/components/schemas/ReviewStatus"
+
+    Report:
+      type: object
+      description: 通報 1 件。通報者のセッショントークンは含めない。
+      required: [id, conversation_id, reason, status, created_at]
+      properties:
+        id:
+          type: integer
           examples:
-            - contact
+            - 12
+        conversation_id:
+          type: string
+          format: uuid
+          examples:
+            - 7f1fca8f-ca30-40c7-a752-ef5ffa6bac2a
+        reason:
+          $ref: "#/components/schemas/ReportReason"
+        status:
+          $ref: "#/components/schemas/ReviewStatus"
+        created_at:
+          type: string
+          format: date-time
+          examples:
+            - "2026-09-21T06:28:47.837216Z"
+
+    ReportList:
+      type: object
+      required: [reports]
+      properties:
+        reports:
+          type: array
+          items:
+            $ref: "#/components/schemas/Report"
+
+    ReportReview:
+      type: object
+      description: 通報 1 件と、対象の会話ログ。
+      required: [report, reporter, conversation, messages]
+      properties:
+        report:
+          $ref: "#/components/schemas/Report"
+        reporter:
+          type: integer
+          description: 通報者のルーム内の番号（1 起点）
+          examples:
+            - 1
+        conversation:
+          type: object
+          required: [id, topic_id, room_type, participants, started_at, ended_at, end_reason, is_flagged]
+          properties:
+            id:
+              type: string
+              format: uuid
+            topic_id:
+              type: integer
+            room_type:
+              type: integer
+              enum: [2, 3]
+            participants:
+              type: integer
+              description: 会話に割り当てられた参加者の数
+            started_at:
+              type: string
+              format: date-time
+            ended_at:
+              type: [string, "null"]
+              format: date-time
+              description: 進行中は null
+            end_reason:
+              type: [string, "null"]
+              description: "`user_left` / `reported` など。進行中は null"
+              examples:
+                - reported
+            is_flagged:
+              type: boolean
+              description: true の会話は保持期間を過ぎても削除しない
+        messages:
+          type: array
+          description: 記録されたメッセージを古い順に。フィルタが配信を止めたものも含む
+          items:
+            type: object
+            required: [participant, body, moderation_flag, created_at]
+            properties:
+              participant:
+                type: integer
+                description: 送信者のルーム内の番号（1 起点）
+                examples:
+                  - 2
+              body:
+                type: string
+                examples:
+                  - LINEのID教えて
+              moderation_flag:
+                type: integer
+                enum: [0, 1, 2]
+                description: |
+                  0 は問題なし、1 は NG ワードフィルタが判定したもの、2 は通報時点で記録済み
+                  だった、通報者以外の発言
+                examples:
+                  - 1
+              created_at:
+                type: string
+                format: date-time
+
+    ClaimSubmission:
+      type: object
+      description: 権利侵害の申し立て。各項目は前後の空白を取り除いてから検査する。
+      required: [name, email, right, details]
+      properties:
+        name:
+          type: string
+          description: 申立人の氏名または名称
+          maxLength: 100
+          examples:
+            - 山田 太郎
+        email:
+          type: string
+          format: email
+          description: 対応の結果を連絡する宛先。表示名付きの形式は受け付けない
+          maxLength: 254
+          examples:
+            - taro@example.com
+        right:
+          $ref: "#/components/schemas/ClaimRight"
+        details:
+          type: string
+          description: 侵害情報の内容、いつごろのどの会話か、侵害と考える理由
+          maxLength: 4000
+          examples:
+            - 私の本名と勤務先が会話の中に書き込まれていたと知人から聞きました。
+
+    ClaimRight:
+      type: string
+      description: |
+        侵害されたと考える権利。`privacy` はプライバシー、`defamation` は名誉・信用、
+        `copyright` は著作権、`other` はそれ以外
+      enum: [privacy, defamation, copyright, other]
+      examples:
+        - privacy
+
+    Claim:
+      type: object
+      description: 権利侵害の申し立て 1 件。
+      required: [id, name, email, right, details, status, created_at]
+      properties:
+        id:
+          type: integer
+          examples:
+            - 3
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        right:
+          $ref: "#/components/schemas/ClaimRight"
+        details:
+          type: string
+        status:
+          $ref: "#/components/schemas/ReviewStatus"
+        created_at:
+          type: string
+          format: date-time
+
+    ClaimList:
+      type: object
+      required: [claims]
+      properties:
+        claims:
+          type: array
+          items:
+            $ref: "#/components/schemas/Claim"
 
     MatchingState:
       type: object
@@ -843,6 +1271,42 @@ components:
             type: string
             examples:
               - topic not found
+
+    InvalidListQuery:
+      description: "`status` が一覧にない、または `before` / `limit` / `conversation_id` が読めない"
+      content:
+        text/plain:
+          schema:
+            type: string
+            examples:
+              - unknown status
+
+    InvalidSubmissionID:
+      description: ID が正の整数でない
+      content:
+        text/plain:
+          schema:
+            type: string
+            examples:
+              - invalid id
+
+    InvalidStatusUpdate:
+      description: ID かリクエストボディが不正、または `status` が一覧にない
+      content:
+        text/plain:
+          schema:
+            type: string
+            examples:
+              - unknown status
+
+    SubmissionNotFound:
+      description: その ID の通報または申し立てが無い
+      content:
+        text/plain:
+          schema:
+            type: string
+            examples:
+              - not found
 
     InternalServerError:
       description: サーバー側の想定外の失敗

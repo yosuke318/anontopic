@@ -6,10 +6,10 @@ import { ApiError } from "@/lib/api";
 import { reportReasons, submitReport, type ReportReason } from "@/lib/reports";
 
 const lead =
-  "この会話を運営に報告します。相手を選ぶ必要はありません。報告された会話は運営だけが確認します。";
+  "この会話を運営に報告します。相手を選ぶ必要はありません。通報するとこの会話は終了し、ほかの参加者の発言は見えなくなります。報告された会話は運営だけが確認します。";
 
 const done =
-  "通報を受け付けました。内容は運営が確認します。結果を個別にお知らせすることはありません。";
+  "通報を受け付けました。この会話は終了しました。内容は運営が確認します。結果を個別にお知らせすることはありません。";
 
 function messageForError(error: unknown): string {
   if (error instanceof ApiError) {
@@ -35,10 +35,12 @@ export function ReportDialog({
   conversationId,
   open,
   onClose,
+  onReported,
 }: {
   conversationId: string;
   open: boolean;
   onClose: () => void;
+  onReported: () => void;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [reason, setReason] = useState<ReportReason>("other");
@@ -70,6 +72,7 @@ export function ReportDialog({
     try {
       await submitReport(conversationId, reason);
       setSubmitted(true);
+      onReported();
     } catch (err) {
       setError(messageForError(err));
     }
