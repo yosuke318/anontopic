@@ -372,9 +372,9 @@ func (r *fakeRepository) ending() (time.Time, string) {
 }
 
 // moderatorFunc is a Moderator written as a function.
-type moderatorFunc func(ctx context.Context, body string) (Decision, error)
+type moderatorFunc func(ctx context.Context, body string) (Verdict, error)
 
-func (f moderatorFunc) Moderate(ctx context.Context, body string) (Decision, error) {
+func (f moderatorFunc) Moderate(ctx context.Context, body string) (Verdict, error) {
 	return f(ctx, body)
 }
 

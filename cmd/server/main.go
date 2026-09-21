@@ -26,6 +26,7 @@ import (
 	"github.com/yosuke318/anontopic/internal/capacity"
 	"github.com/yosuke318/anontopic/internal/chat"
 	"github.com/yosuke318/anontopic/internal/matching"
+	"github.com/yosuke318/anontopic/internal/moderation"
 	"github.com/yosuke318/anontopic/internal/report"
 	"github.com/yosuke318/anontopic/internal/session"
 	"github.com/yosuke318/anontopic/internal/topic"
@@ -109,7 +110,9 @@ func run() error {
 		slog.Warn("ADMIN_API_TOKEN is unset, the topic administration endpoints are not served")
 	}
 
-	chats := newChatService(pool, rdb, limits)
+	filter := newModerationService(ctx, pool)
+
+	chats := newChatService(pool, rdb, limits, filter)
 
 	// Only a participant of a conversation may report it, and the chat module
 	// is what knows who those are.
@@ -190,20 +193,54 @@ func handleReady(pool *pgxpool.Pool, rdb *redis.Client) http.HandlerFunc {
 	}
 }
 
-// newChatService builds the chat module from the environment. No moderation
-// is wired into it, so a message reaches the room as it was written.
-func newChatService(pool *pgxpool.Pool, rdb *redis.Client, limits *capacity.Service) *chat.Service {
-	slog.Warn("no moderation is wired into chat, messages are delivered without being judged")
-
+// newChatService builds the chat module from the environment.
+func newChatService(pool *pgxpool.Pool, rdb *redis.Client, limits *capacity.Service, filter *moderation.Service) *chat.Service {
 	return chat.NewService(
 		chat.NewPostgresRepository(pool),
 		chat.NewRedisStore(rdb),
-		nil,
+		moderator{filter},
 		limits,
 		chat.Options{
 			RejoinGrace: envDuration("CHAT_REJOIN_GRACE", chat.DefaultRejoinGrace),
 		},
 	)
+}
+
+// newModerationService builds the filter every message passes before its room
+// sees it, and keeps its dictionary in step with the words that are stored.
+// A dictionary that cannot be read at startup is read again by the reload
+// loop; until one is in force the filter refuses messages rather than
+// delivering them unjudged.
+func newModerationService(ctx context.Context, pool *pgxpool.Pool) *moderation.Service {
+	filter := moderation.NewService(moderation.NewPostgresRepository(pool), moderation.Options{
+		ReloadInterval: envDuration("MODERATION_RELOAD_INTERVAL", moderation.DefaultReloadInterval),
+	})
+
+	loadCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := filter.Load(loadCtx); err != nil {
+		slog.Error("load the ng word dictionary", slog.Any("error", err))
+	}
+	go filter.Run(ctx)
+
+	return filter
+}
+
+// moderator carries what the moderation module decided into the terms the
+// chat module judges a message by, so that neither module names the other's
+// decisions. The category a message was blocked for is what its sender is
+// told as the reason.
+type moderator struct {
+	filter *moderation.Service
+}
+
+func (m moderator) Moderate(ctx context.Context, body string) (chat.Verdict, error) {
+	verdict, err := m.filter.Moderate(ctx, body)
+	if err != nil || verdict.Decision == moderation.DecisionBlock {
+		return chat.Verdict{Decision: chat.DecisionBlock, Reason: string(verdict.Category)}, err
+	}
+
+	return chat.Verdict{Decision: chat.DecisionAllow}, nil
 }
 
 // newCapacityService builds the limits the service refuses work at. The

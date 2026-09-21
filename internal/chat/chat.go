@@ -119,9 +119,18 @@ const (
 	DecisionAllow Decision = iota
 	// DecisionFlag delivers the message and records the flag on it.
 	DecisionFlag
-	// DecisionBlock keeps the message from the room and tells its sender.
+	// DecisionBlock keeps the message from the room and tells its sender. The
+	// message is recorded with the flag on it all the same.
 	DecisionBlock
 )
+
+// Verdict is what a Moderator says about the body of one message, and why.
+type Verdict struct {
+	Decision Decision
+	// Reason is what the sender of a blocked message is told it was blocked
+	// for. It is passed on as the Moderator put it.
+	Reason string
+}
 
 // SessionAuthenticator resolves the session a request carries and returns the
 // token identifying the participant, plus the hashed address the session was
@@ -157,7 +166,7 @@ type MessageLimiter interface {
 
 // Moderator judges the body of a message before the room sees it.
 type Moderator interface {
-	Moderate(ctx context.Context, body string) (Decision, error)
+	Moderate(ctx context.Context, body string) (Verdict, error)
 }
 
 // Conversation is the room a set of participants was assigned to.
@@ -443,25 +452,19 @@ func (s *Service) sendMessage(ctx context.Context, c *conn, body string) {
 		return
 	}
 
-	decision, err := s.moderate(ctx, body)
+	verdict, err := s.moderate(ctx, body)
 	if err != nil {
 		slog.Error("moderate message",
 			slog.String("conversation_id", c.conversationID), slog.Any("error", err))
 		c.send(errorEvent(codeUnavailable, "the message could not be checked"))
 		return
 	}
-	if decision == DecisionBlock {
-		c.send(errorEvent(codeBlocked, "the message was not delivered"))
-		return
-	}
 
 	flag := moderationFlagClean
-	if decision == DecisionFlag {
+	if verdict.Decision != DecisionAllow {
 		flag = moderationFlagNG
 	}
 
-	// The message is taken for recording before the room reads it, so that a
-	// message the server cannot keep is not delivered either.
 	msg := Message{
 		ConversationID: c.conversationID,
 		SenderToken:    c.token,
@@ -469,6 +472,25 @@ func (s *Service) sendMessage(ctx context.Context, c *conn, body string) {
 		Flag:           flag,
 		CreatedAt:      s.now().UTC(),
 	}
+
+	if verdict.Decision == DecisionBlock {
+		// A message the room never sees is recorded all the same, and the
+		// sender is told the same thing whether or not it could be. The
+		// reasoning is in
+		// docs/adr/0018-record-the-messages-the-filter-blocked.md.
+		if err := s.writer.add(ctx, msg); err != nil {
+			slog.Error("record blocked message",
+				slog.String("conversation_id", c.conversationID), slog.Any("error", err))
+		}
+
+		ev := errorEvent(codeBlocked, "the message was not delivered")
+		ev.Reason = verdict.Reason
+		c.send(ev)
+		return
+	}
+
+	// The message is taken for recording before the room reads it, so that a
+	// message the server cannot keep is not delivered either.
 	if err := s.writer.add(ctx, msg); err != nil {
 		slog.Error("record message",
 			slog.String("conversation_id", c.conversationID), slog.Any("error", err))
@@ -496,9 +518,9 @@ func (s *Service) allowMessage(ctx context.Context, token string) (bool, error) 
 
 // moderate asks the moderator about a body. Without one, every message is
 // delivered as it was written.
-func (s *Service) moderate(ctx context.Context, body string) (Decision, error) {
+func (s *Service) moderate(ctx context.Context, body string) (Verdict, error) {
 	if s.moderator == nil {
-		return DecisionAllow, nil
+		return Verdict{Decision: DecisionAllow}, nil
 	}
 	return s.moderator.Moderate(ctx, body)
 }
