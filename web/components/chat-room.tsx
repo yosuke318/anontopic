@@ -259,7 +259,7 @@ export function ChatRoom({ conversationId, topics }: { conversationId: string; t
                   <Link
                     href="/about#prohibited"
                     target="_blank"
-                    rel="noopener"
+                    rel="noopener noreferrer"
                     className={chipButtonClass}
                   >
                     {prohibitedLinkLabel}
