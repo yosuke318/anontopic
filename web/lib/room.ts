@@ -14,6 +14,11 @@ export const roomErrorCodes = [
 
 export type RoomErrorCode = (typeof roomErrorCodes)[number];
 
+// blockReasonsはblockedのerrorが付けてくる、止めた理由の分類。値はng_words.categoryと同じ。
+export const blockReasons = ["contact", "meetup", "dating", "sexual", "solicitation"] as const;
+
+export type BlockReason = (typeof blockReasons)[number];
+
 export type RoomConversation = {
   id: string;
   topicId: number;
@@ -29,7 +34,7 @@ export type RoomEvent =
   | { type: "participant_left"; participant: number; present: number[] }
   | { type: "message"; participant: number; body: string; sentAt: string }
   | { type: "ended"; reason: string }
-  | { type: "error"; code: RoomErrorCode; message: string };
+  | { type: "error"; code: RoomErrorCode; message: string; reason: BlockReason | null };
 
 // roomSocketUrlは会話につなぐWebSocketのURLを組み立てる。オリジンを別に指定
 // できるようにしつつ、指定が無ければAPIと同じところにつなぐ。
@@ -126,10 +131,13 @@ export function parseRoomEvent(data: string): RoomEvent | null {
       if (code === undefined) {
         return null;
       }
+      // 知らない理由は、理由が付いていなかったものとして扱う。
+      const reason = blockReasons.find((known) => known === frame.reason) ?? null;
       return {
         type: "error",
         code,
         message: typeof frame.message === "string" ? frame.message : "",
+        reason,
       };
     }
     default:

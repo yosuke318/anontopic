@@ -135,7 +135,7 @@ export default function AboutPage() {
           </div>
         </section>
 
-        <section className="mt-14">
+        <section id="prohibited" className="mt-14 scroll-mt-20">
           <h2 className="text-2xl font-bold tracking-tight">禁止していること</h2>
           <p className="text-muted mt-6 leading-7">{prohibitedLead}</p>
           <ul className="text-muted mt-6 list-disc space-y-2 pl-5 leading-7">

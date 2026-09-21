@@ -1,11 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
 
 import { ReportDialog } from "@/components/report-dialog";
 import { joinQueue, leaveQueue, type RoomType } from "@/lib/matching";
-import { messageMaxLength, participantLabel } from "@/lib/room";
+import { type BlockReason, messageMaxLength, participantLabel } from "@/lib/room";
 import type { Topic } from "@/lib/topics";
 import {
   useRoomSocket,
@@ -25,7 +26,7 @@ const statusLabels: Record<RoomStatus, string> = {
 
 const failureMessages: Record<OutgoingFailure, string> = {
   blocked:
-    "この内容は送信できません。連絡先の交換や禁止している表現が含まれていないか確認してください。",
+    "この内容は利用規約で禁止している表現にあたるため、送信できません。相手には届いていません。",
   rate_limited: "続けて送りすぎました。少し待ってから送り直してください。",
   too_long: `本文が長すぎます。${messageMaxLength} 文字までにしてください。`,
   empty_body: "本文が空のため送信できませんでした。",
@@ -33,6 +34,21 @@ const failureMessages: Record<OutgoingFailure, string> = {
   unavailable: "サーバーの都合で送信できませんでした。少し待ってから送り直してください。",
   timeout: "送信を確認できませんでした。相手に届いていない可能性があります。",
 };
+
+// blockedMessagesは止めた理由ごとの説明。どの語に当たったかは出さない。
+const blockedMessages: Record<BlockReason, string> = {
+  contact:
+    "URL・電話番号・メールアドレス・SNS の ID・住所などの連絡先は、利用規約で送受信を禁止しているため送信できません。相手には届いていません。",
+  meetup:
+    "待ち合わせや直接会うことを持ちかける内容は、利用規約で禁止しているため送信できません。相手には届いていません。",
+  dating:
+    "交際や出会いを目的とした内容は、利用規約で禁止しているため送信できません。相手には届いていません。",
+  sexual: "性的な内容は、利用規約で禁止しているため送信できません。相手には届いていません。",
+  solicitation:
+    "勧誘や宣伝にあたる内容は、利用規約で禁止しているため送信できません。相手には届いていません。",
+};
+
+const prohibitedLinkLabel = "禁止していることを見る";
 
 const noticeMessages: Record<NoticeKind, string> = {
   reconnected: "接続が戻りました。切れていた間に流れたメッセージは表示されません。",
@@ -233,8 +249,22 @@ export function ChatRoom({ conversationId, topics }: { conversationId: string; t
             <span className="text-muted text-xs">送信中…</span>
           ) : (
             <div className="flex max-w-[85%] flex-col items-end gap-1">
-              <span className="text-danger text-xs leading-5">{failureMessages[item.failure]}</span>
+              <span className="text-danger text-xs leading-5">
+                {item.failure === "blocked" && item.blockReason !== null
+                  ? blockedMessages[item.blockReason]
+                  : failureMessages[item.failure]}
+              </span>
               <div className="flex gap-2">
+                {item.failure === "blocked" && (
+                  <Link
+                    href="/about#prohibited"
+                    target="_blank"
+                    rel="noopener"
+                    className={chipButtonClass}
+                  >
+                    {prohibitedLinkLabel}
+                  </Link>
+                )}
                 {item.failure !== "blocked" && (
                   <button
                     type="button"

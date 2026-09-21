@@ -55,8 +55,9 @@ type serverEvent struct {
 	// Body and SentAt are set on eventMessage.
 	Body   string     `json:"body,omitempty"`
 	SentAt *time.Time `json:"sent_at,omitempty"`
-	// Reason is set on eventEnded and holds a value of
-	// conversations.end_reason.
+	// Reason is set on eventEnded, where it holds a value of
+	// conversations.end_reason, and on eventError of codeBlocked, where it
+	// holds what the Moderator said the message was blocked for.
 	Reason string `json:"reason,omitempty"`
 	// Code and Message are set on eventError.
 	Code    string `json:"code,omitempty"`
