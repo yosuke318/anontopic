@@ -14,7 +14,8 @@ Goのモジュラーモノリス（バックエンド）とNext.js（フロン�
 │   ├── chat/            # ルーム内のリアルタイムメッセージング（WebSocket）
 │   ├── topic/           # トピックカタログとその公開状態
 │   ├── moderation/      # 自動コンテンツチェックと制裁アクション
-│   ├── report/          # 通報の受付とレビューフロー
+│   ├── report/          # 通報・権利侵害の申し立ての受付とレビューフロー
+│   ├── adminauth/       # 管理APIのトークン検査（各モジュールの管理ハンドラが使う）
 │   └── retention/       # 保持期間を過ぎたデータの削除
 ├── web/                 # Next.js（App Router / TypeScript / Tailwind CSS）
 ├── infra/               # Terraform（M3で使用）
@@ -186,11 +187,39 @@ curl -X POST -b cookie.txt -H 'Content-Type: application/json' \
   -d '{"conversation_id":"<会話 ID>","reason":"contact"}' localhost:8080/api/reports
 ```
 
-`reason` は `sexual` / `contact` / `harassment` / `spam` / `other` のいずれか。通報できるのは
-その会話の参加者だけで、参加していない会話と存在しない会話は区別せず 403 を返す。会話が
-終わった後も通報できる。同じ会話を同じ通報者が繰り返し通報しても記録は増えない。
+`reason` は `dating` / `sexual` / `contact` / `harassment` / `spam` / `other` のいずれか。
+通報できるのはその会話の参加者だけで、参加していない会話と存在しない会話は区別せず 403 を
+返す。会話が終わった後も通報できる。同じ会話を同じ通報者が繰り返し通報しても記録は増えない。
 
-通報を読むための管理画面と、通報が重なった利用者への制裁はまだ実装していない。
+通報を受けた会話は、その場で次のように扱う。理由は
+[ADR-0021](docs/adr/0021-end-and-keep-a-conversation-once-it-is-reported.md) にある。
+
+- `conversations.is_flagged` を true にし、保持期間を過ぎても消さない対象にする
+- 通報者以外が送った `moderation_flag = 0` のメッセージを `2`（通報あり）にする
+- 進行中の会話は `end_reason = reported` で終わらせ、参加者全員に `ended` を送る
+- 通報した人の画面では、ほかの参加者の発言をブロックして伏せる
+
+会話の参加者でない人（権利を侵害されたと考える第三者）からの申し立ては、
+`/claims` のフォーム（`POST /api/claims`）で受け付ける。セッションは要らず、
+IPハッシュごとに `CAPACITY_CLAIM_*` のレートで制限する。理由は
+[ADR-0022](docs/adr/0022-take-rights-infringement-claims-from-anyone.md) にある。
+
+運営は管理APIで通報と申し立てを確認し、対応ステータス（`open` / `reviewing` /
+`actioned` / `rejected`）を更新する。管理画面は本体とは別のリポジトリで作り、この管理APIを
+サーバー側から叩く。理由は
+[ADR-0023](docs/adr/0023-review-reports-through-the-admin-api.md) にある。
+
+```bash
+TOKEN=local-development-admin-token   # .envのADMIN_API_TOKENと同じ値
+curl -H "Authorization: Bearer $TOKEN" 'localhost:8080/api/admin/reports?status=open'
+curl -H "Authorization: Bearer $TOKEN" localhost:8080/api/admin/reports/1   # 会話ログ付き
+curl -X PATCH -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"status":"reviewing"}' localhost:8080/api/admin/reports/1
+curl -H "Authorization: Bearer $TOKEN" 'localhost:8080/api/admin/claims?status=open'
+```
+
+会話ログでは参加者をルーム内の番号で示し、セッショントークンは返さない。
+通報が重なった利用者への制裁はまだ実装していない。
 
 ### 接続数の上限とレート制限
 
@@ -206,6 +235,7 @@ curl -X POST -b cookie.txt -H 'Content-Type: application/json' \
 | 1アドレスの接続数（`CAPACITY_MAX_CONNECTIONS_PER_IP`） | IPハッシュ | ハンドシェイクに429と `Retry-After` |
 | メッセージ送信（`CAPACITY_MESSAGE_*`） | セッショントークン | `{"type":"error","code":"rate_limited"}` |
 | マッチング要求（`CAPACITY_MATCH_*`） | IPハッシュ | `POST /api/matching` に429と `Retry-After` |
+| 権利侵害の申し立て（`CAPACITY_CLAIM_*`） | IPハッシュ | `POST /api/claims` に429と `Retry-After` |
 
 拒否は接続を数える段で返るため、上限に達している間の接続はセッションの参照も会話の参照も
 行わない。手元で確かめるには `CAPACITY_MAX_CONNECTIONS` を小さくして起動する。
@@ -223,7 +253,7 @@ APIサーバーの設定は環境変数で行う。
 | `SESSION_COOKIE_SECURE` | `true` | Cookieに `Secure` を付ける。httpのローカルでは `false` |
 | `SESSION_COOKIE_SAMESITE` | `lax` | `lax` / `strict` / `none`。`none` は `SESSION_COOKIE_SECURE=true` が必要 |
 | `SESSION_IP_HASH_SECRET` | プロセス起動ごとの乱数 | IPハッシュの鍵。未設定だと再起動でハッシュが変わり、ハッシュに紐づくBANが外れる |
-| `ADMIN_API_TOKEN` | なし | トピック管理APIが要求するBearerトークン。未設定だと管理エンドポイントを登録しない |
+| `ADMIN_API_TOKEN` | なし | 管理API（`/api/admin/*`）が要求するBearerトークン。未設定だと管理エンドポイントを登録しない |
 | `TOPIC_CACHE_TTL` | `5m` | トピック一覧をプロセス内に保持する時間。`300s` のようなGoのduration表記 |
 | `MATCHING_WAIT_TTL` | `5m` | 待機キューに並び続けられる時間。超えた利用者はキューから外れる |
 | `MATCHING_FALLBACK_AFTER` | `60s` | 3人ルームの待機がこの時間を超えたら2人で成立させる |
@@ -237,6 +267,8 @@ APIサーバーの設定は環境変数で行う。
 | `CAPACITY_MESSAGE_INTERVAL` | `1s` | 送信枠が1通ずつ回復する間隔 |
 | `CAPACITY_MATCH_BURST` | `3` | 続けて出せるマッチング要求の数。IPハッシュ単位で数える |
 | `CAPACITY_MATCH_INTERVAL` | `10s` | マッチング要求の枠が1回ずつ回復する間隔 |
+| `CAPACITY_CLAIM_BURST` | `3` | 続けて送れる権利侵害の申し立ての数。IPハッシュ単位で数える |
+| `CAPACITY_CLAIM_INTERVAL` | `10m` | 申し立ての枠が1回ずつ回復する間隔 |
 
 ### フロントエンド
 

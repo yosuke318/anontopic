@@ -1,7 +1,7 @@
 // Package capacity owns the limits the service refuses work at: how many
 // WebSocket connections it holds at once, how many of them come from one
-// hashed address, and how often a session may send a message or ask to be
-// matched.
+// hashed address, how often a session may send a message or ask to be
+// matched, and how often an address may file a rights infringement claim.
 //
 // The connection count is kept in Redis so that every server counts against
 // the same total. A connection holds its place for a lease, renews the lease
@@ -64,6 +64,7 @@ const (
 const (
 	rateMessage = "message"
 	rateMatch   = "match"
+	rateClaim   = "claim"
 )
 
 var (
@@ -74,6 +75,12 @@ var (
 	// DefaultMatchLimit is how often one hashed address may ask to be
 	// matched: a few tries in a row, and then one per ten seconds.
 	DefaultMatchLimit = Limit{Burst: 3, Interval: 10 * time.Second}
+
+	// DefaultClaimLimit is how often one hashed address may file a rights
+	// infringement claim: a few in a row, and then one per ten minutes. The
+	// form takes claims without a session, so this rate is all that stands
+	// between it and a script posting to it.
+	DefaultClaimLimit = Limit{Burst: 3, Interval: 10 * time.Minute}
 )
 
 var (
@@ -127,6 +134,7 @@ type Service struct {
 	renewInterval time.Duration
 	message       Limit
 	match         Limit
+	claim         Limit
 	now           func() time.Time
 }
 
@@ -147,6 +155,8 @@ type Options struct {
 	Message Limit
 	// Match defaults to DefaultMatchLimit.
 	Match Limit
+	// Claim defaults to DefaultClaimLimit.
+	Claim Limit
 }
 
 // NewService builds a Service.
@@ -182,6 +192,9 @@ func NewService(store Store, opts Options) *Service {
 	if !opts.Match.valid() {
 		opts.Match = DefaultMatchLimit
 	}
+	if !opts.Claim.valid() {
+		opts.Claim = DefaultClaimLimit
+	}
 
 	return &Service{
 		store:         store,
@@ -190,6 +203,7 @@ func NewService(store Store, opts Options) *Service {
 		renewInterval: opts.RenewInterval,
 		message:       opts.Message,
 		match:         opts.Match,
+		claim:         opts.Claim,
 		now:           time.Now,
 	}
 }
@@ -249,6 +263,16 @@ func (s *Service) AllowMatch(ctx context.Context, subject string) (bool, time.Du
 		return allowed, 0, err
 	}
 	return false, s.match.Interval, nil
+}
+
+// AllowClaim reports whether subject may file another rights infringement
+// claim now, and how long it has to wait when it may not.
+func (s *Service) AllowClaim(ctx context.Context, subject string) (bool, time.Duration, error) {
+	allowed, err := s.store.Take(ctx, rateClaim, subject, s.claim, s.now().UTC())
+	if err != nil || allowed {
+		return allowed, 0, err
+	}
+	return false, s.claim.Interval, nil
 }
 
 // lease is one connection's place in the count.
