@@ -63,7 +63,8 @@ operations:
       間隔は [openapi.yaml](openapi.yaml) の `/ws/rooms/{roomID}` に書いてある。
 
       受け取った本文はモデレーションにかけ、ブロックされたものは誰にも配らず送信者に
-      `blocked` を返す。配るものは保存のために受け付けてから部屋に流す。
+      `blocked` と止めた理由の分類を返す。ブロックされた本文も `moderation_flag` を立てて保存する。
+      配るものは保存のために受け付けてから部屋に流す。
     messages:
       - $ref: "#/channels/room/messages/clientMessage"
 
@@ -247,6 +248,19 @@ components:
             description: 人が読むための説明。表示に使う前提の文言ではない
             examples:
               - the message was not delivered
+          reason:
+            type: string
+            enum:
+              - contact
+              - meetup
+              - dating
+              - sexual
+              - solicitation
+            description: |
+              `code` が `blocked` のときだけ付く、止めた理由の分類。値は `ng_words.category` と同じで、
+              `contact` は外部連絡先（URL・電話番号・メールアドレス・SNS の ID・住所など）。
+              どの語やパターンに当たったかは返さない。理由は
+              [ADR-0020](adr/0020-tell-the-sender-the-category-a-message-was-blocked-for.md) にある。
 
   schemas:
     conversation:
