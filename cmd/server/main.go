@@ -216,7 +216,9 @@ func newModerationService(ctx context.Context, pool *pgxpool.Pool) *moderation.S
 		ReloadInterval: envDuration("MODERATION_RELOAD_INTERVAL", moderation.DefaultReloadInterval),
 	})
 
-	if err := filter.Load(ctx); err != nil {
+	loadCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := filter.Load(loadCtx); err != nil {
 		slog.Error("load the ng word dictionary", slog.Any("error", err))
 	}
 	go filter.Run(ctx)
