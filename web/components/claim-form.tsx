@@ -73,7 +73,10 @@ export function ClaimForm() {
     );
   }
 
-  const detailsLength = [...details.trim()].length;
+  // textareaのmaxLengthは入力された文字をそのまま数えるため、カウンターも
+  // 前後の空白を落とさずに数える。落とすと、入力できなくなった時点の表示が
+  // 上限より少ない数で止まる。
+  const detailsLength = [...details].length;
 
   return (
     <form onSubmit={handleSubmit} className="mt-10 flex flex-col gap-8">
