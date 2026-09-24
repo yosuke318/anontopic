@@ -107,7 +107,7 @@ func run() error {
 
 	adminToken := os.Getenv("ADMIN_API_TOKEN")
 	if adminToken == "" {
-		slog.Warn("ADMIN_API_TOKEN is unset, the topic administration endpoints are not served")
+		slog.Warn("ADMIN_API_TOKEN is unset, the administration endpoints are not served")
 	}
 
 	filter := newModerationService(ctx, pool)
@@ -115,8 +115,8 @@ func run() error {
 	chats := newChatService(pool, rdb, limits, filter)
 
 	// Only a participant of a conversation may report it, and the chat module
-	// is what knows who those are.
-	reports := report.NewService(report.NewPostgresRepository(pool), chats)
+	// is what knows who those are and holds what was said.
+	reports := report.NewService(report.NewPostgresRepository(pool), reportedConversations{chats})
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", handleHealth)
@@ -125,7 +125,7 @@ func run() error {
 	chat.NewHandler(chats, sessions, limits, allowedOrigins).Register(mux)
 	topic.NewHandler(topics, adminToken).Register(mux)
 	matching.NewHandler(matches, sessions).Register(mux)
-	report.NewHandler(reports, sessions).Register(mux)
+	report.NewHandler(reports, sessions, limits, adminToken).Register(mux)
 
 	srv := &http.Server{
 		Addr:              addr,
@@ -243,6 +243,53 @@ func (m moderator) Moderate(ctx context.Context, body string) (chat.Verdict, err
 	return chat.Verdict{Decision: chat.DecisionAllow}, nil
 }
 
+// reportedConversations carries what the report module asks about a
+// conversation to the chat module that owns it, and the transcript it reads
+// back into the report module's terms.
+type reportedConversations struct {
+	chats *chat.Service
+}
+
+func (c reportedConversations) IsParticipant(ctx context.Context, conversationID, token string) (bool, error) {
+	return c.chats.IsParticipant(ctx, conversationID, token)
+}
+
+func (c reportedConversations) Flag(ctx context.Context, conversationID, reporterToken string) error {
+	return c.chats.Flag(ctx, conversationID, reporterToken)
+}
+
+func (c reportedConversations) EndReported(ctx context.Context, conversationID string) error {
+	return c.chats.EndReported(ctx, conversationID)
+}
+
+func (c reportedConversations) Transcript(ctx context.Context, conversationID string) (report.Transcript, error) {
+	tr, err := c.chats.Transcript(ctx, conversationID)
+	if err != nil {
+		return report.Transcript{}, err
+	}
+
+	out := report.Transcript{
+		ConversationID: tr.Conversation.ID,
+		TopicID:        tr.Conversation.TopicID,
+		RoomType:       tr.Conversation.RoomType,
+		StartedAt:      tr.Conversation.StartedAt,
+		EndedAt:        tr.Conversation.EndedAt,
+		EndReason:      tr.EndReason,
+		Flagged:        tr.Flagged,
+		Participants:   tr.Conversation.Participants,
+		Messages:       make([]report.TranscriptMessage, 0, len(tr.Messages)),
+	}
+	for _, msg := range tr.Messages {
+		out.Messages = append(out.Messages, report.TranscriptMessage{
+			SenderToken: msg.SenderToken,
+			Body:        msg.Body,
+			Flag:        msg.Flag,
+			CreatedAt:   msg.CreatedAt,
+		})
+	}
+	return out, nil
+}
+
 // newCapacityService builds the limits the service refuses work at. The
 // number of connections is what the running cost is budgeted against, so the
 // value it takes is logged at startup.
@@ -259,6 +306,10 @@ func newCapacityService(rdb *redis.Client) *capacity.Service {
 		Match: capacity.Limit{
 			Burst:    envInt("CAPACITY_MATCH_BURST", capacity.DefaultMatchLimit.Burst),
 			Interval: envDuration("CAPACITY_MATCH_INTERVAL", capacity.DefaultMatchLimit.Interval),
+		},
+		Claim: capacity.Limit{
+			Burst:    envInt("CAPACITY_CLAIM_BURST", capacity.DefaultClaimLimit.Burst),
+			Interval: envDuration("CAPACITY_CLAIM_INTERVAL", capacity.DefaultClaimLimit.Interval),
 		},
 	}
 

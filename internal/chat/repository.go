@@ -22,4 +22,15 @@ type Repository interface {
 	// whether this call is the one that ended it. A conversation that was
 	// already over is left as it is.
 	End(ctx context.Context, conversationID, reason string, at time.Time) (bool, error)
+
+	// Flag marks a conversation as reported, which keeps it past the retention
+	// period, and gives the recorded messages of every participant other than
+	// reporterToken the flag of a reported message. A message the filter
+	// already flagged keeps its flag.
+	Flag(ctx context.Context, conversationID, reporterToken string) error
+
+	// Transcript returns the conversation id names with every message recorded
+	// in it, oldest first. It reports ErrConversationNotFound when there is no
+	// such conversation.
+	Transcript(ctx context.Context, id string) (Transcript, error)
 }

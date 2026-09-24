@@ -270,6 +270,7 @@ type fakeRepository struct {
 	messages  []recordedMessage
 	endedAt   time.Time
 	endReason string
+	flagged   bool
 }
 
 // recordedMessage is one message as the repository stored it.
@@ -335,6 +336,43 @@ func (r *fakeRepository) End(_ context.Context, _, reason string, at time.Time) 
 	r.endReason = reason
 
 	return true, nil
+}
+
+func (r *fakeRepository) Flag(_ context.Context, _, reporterToken string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.flagged = true
+	for i, msg := range r.messages {
+		if msg.senderToken != reporterToken && msg.flag == moderationFlagClean {
+			r.messages[i].flag = moderationFlagReported
+		}
+	}
+
+	return nil
+}
+
+func (r *fakeRepository) Transcript(ctx context.Context, id string) (Transcript, error) {
+	conv, err := r.Conversation(ctx, id)
+	if err != nil {
+		return Transcript{}, err
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	tr := Transcript{Conversation: conv, EndReason: r.endReason, Flagged: r.flagged}
+	for _, msg := range r.messages {
+		tr.Messages = append(tr.Messages, Message{
+			ConversationID: id,
+			SenderToken:    msg.senderToken,
+			Body:           msg.body,
+			Flag:           msg.flag,
+			CreatedAt:      msg.createdAt,
+		})
+	}
+
+	return tr, nil
 }
 
 func (r *fakeRepository) recorded() []recordedMessage {

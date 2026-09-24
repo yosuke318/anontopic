@@ -247,3 +247,84 @@ func TestPostgresRepositoryEndsAConversationOnce(t *testing.T) {
 		t.Fatalf("end_reason = %q, want %q", reason, endReasonUserLeft)
 	}
 }
+
+func TestPostgresRepositoryFlagsAConversationAndTheOtherParticipantsMessages(t *testing.T) {
+	repo := postgresTestRepository(t)
+	id := testConversation(t, repo, "reporter-token", "other-token")
+
+	sentAt := time.Now().UTC().Truncate(time.Microsecond)
+	messages := []Message{
+		{ConversationID: id, SenderToken: "reporter-token", Body: "やめてください", Flag: moderationFlagClean, CreatedAt: sentAt},
+		{ConversationID: id, SenderToken: "other-token", Body: "こんにちは", Flag: moderationFlagClean, CreatedAt: sentAt.Add(time.Millisecond)},
+		{ConversationID: id, SenderToken: "other-token", Body: "会いませんか", Flag: moderationFlagNG, CreatedAt: sentAt.Add(2 * time.Millisecond)},
+	}
+	if err := repo.AddMessages(t.Context(), messages); err != nil {
+		t.Fatalf("AddMessages: %v", err)
+	}
+
+	if err := repo.Flag(t.Context(), id, "reporter-token"); err != nil {
+		t.Fatalf("Flag: %v", err)
+	}
+	// Reporting again changes nothing further.
+	if err := repo.Flag(t.Context(), id, "reporter-token"); err != nil {
+		t.Fatalf("Flag again: %v", err)
+	}
+
+	tr, err := repo.Transcript(t.Context(), id)
+	if err != nil {
+		t.Fatalf("Transcript: %v", err)
+	}
+
+	if !tr.Flagged {
+		t.Fatal("the conversation was not flagged")
+	}
+	if !slices.Equal(tr.Conversation.Participants, []string{"reporter-token", "other-token"}) {
+		t.Fatalf("participants = %v, want both in the order they were recorded", tr.Conversation.Participants)
+	}
+
+	wantFlags := []int{moderationFlagClean, moderationFlagReported, moderationFlagNG}
+	if len(tr.Messages) != len(wantFlags) {
+		t.Fatalf("read %d messages, want %d", len(tr.Messages), len(wantFlags))
+	}
+	for i, msg := range tr.Messages {
+		if msg.Body != messages[i].Body || msg.SenderToken != messages[i].SenderToken {
+			t.Fatalf("message %d = %q of %q, want %q of %q in the order they were sent",
+				i, msg.Body, msg.SenderToken, messages[i].Body, messages[i].SenderToken)
+		}
+		if msg.Flag != wantFlags[i] {
+			t.Fatalf("message %d (%q) has flag %d, want %d", i, msg.Body, msg.Flag, wantFlags[i])
+		}
+		if !msg.CreatedAt.Equal(messages[i].CreatedAt) {
+			t.Fatalf("message %d was read as sent at %v, want %v", i, msg.CreatedAt, messages[i].CreatedAt)
+		}
+	}
+}
+
+func TestPostgresRepositoryReadsTheEndOfAConversationIntoItsTranscript(t *testing.T) {
+	repo := postgresTestRepository(t)
+	id := testConversation(t, repo, "first-token", "second-token")
+
+	if _, err := repo.End(t.Context(), id, endReasonReported, time.Now().UTC()); err != nil {
+		t.Fatalf("End: %v", err)
+	}
+
+	tr, err := repo.Transcript(t.Context(), id)
+	if err != nil {
+		t.Fatalf("Transcript: %v", err)
+	}
+	if tr.EndReason != endReasonReported || tr.Conversation.EndedAt.IsZero() {
+		t.Fatalf("read the end as %v for %q, want a time and %q",
+			tr.Conversation.EndedAt, tr.EndReason, endReasonReported)
+	}
+	if tr.Flagged || len(tr.Messages) != 0 {
+		t.Fatalf("read %+v, want an unflagged conversation without messages", tr)
+	}
+}
+
+func TestPostgresRepositoryReportsATranscriptItCannotRead(t *testing.T) {
+	repo := postgresTestRepository(t)
+
+	if _, err := repo.Transcript(t.Context(), "e6a7d1c7-6d4e-4a2f-89b6-2b2a3e6b1f10"); !errors.Is(err, ErrConversationNotFound) {
+		t.Fatalf("Transcript = %v, want %v", err, ErrConversationNotFound)
+	}
+}
