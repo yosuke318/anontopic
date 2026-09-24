@@ -95,7 +95,13 @@ func (f *fakeRepository) ListClaims(_ context.Context, flt Filter) ([]Claim, err
 		if flt.Status != "" && c.Status != flt.Status {
 			continue
 		}
+		if flt.BeforeID > 0 && c.ID >= flt.BeforeID {
+			continue
+		}
 		out = append(out, c)
+	}
+	if len(out) > flt.Limit {
+		out = out[:flt.Limit]
 	}
 	return out, nil
 }
@@ -433,6 +439,36 @@ func TestSubmitClaimRecordsAnOpenClaimWithTrimmedFields(t *testing.T) {
 	}
 }
 
+func TestListClaimsReadsThePagesOfTheClaimsNewestFirst(t *testing.T) {
+	env := newTestEnv(nil)
+	for _, name := range []string{"一人目", "二人目", "三人目"} {
+		if _, err := env.svc.SubmitClaim(context.Background(), Claim{
+			Name:    name,
+			Email:   "taro@example.com",
+			Right:   RightOther,
+			Details: "内容",
+		}); err != nil {
+			t.Fatalf("SubmitClaim: %v", err)
+		}
+	}
+
+	page, err := env.svc.ListClaims(context.Background(), Filter{Limit: 2})
+	if err != nil {
+		t.Fatalf("ListClaims: %v", err)
+	}
+	if len(page) != 2 || page[0].Name != "三人目" || page[1].Name != "二人目" {
+		t.Fatalf("page = %+v, want the two newest claims", page)
+	}
+
+	next, err := env.svc.ListClaims(context.Background(), Filter{BeforeID: page[1].ID, Limit: 2})
+	if err != nil {
+		t.Fatalf("ListClaims before: %v", err)
+	}
+	if len(next) != 1 || next[0].Name != "一人目" {
+		t.Fatalf("next = %+v, want the oldest claim alone", next)
+	}
+}
+
 func TestSubmitClaimRefusesAClaimOutOfBounds(t *testing.T) {
 	valid := Claim{Name: "山田 太郎", Email: "taro@example.com", Right: RightDefamation, Details: "内容"}
 
@@ -679,6 +715,25 @@ func TestClaimEndpointHoldsBackAnAddressOverItsRate(t *testing.T) {
 	}
 	if got := rec.Header().Get("Retry-After"); got != "600" {
 		t.Fatalf("Retry-After = %q, want 600", got)
+	}
+}
+
+func TestClaimEndpointKeepsTheAllowanceOfABodyItCannotRead(t *testing.T) {
+	// The limiter of this environment lets two claims through.
+	env := newTestEnv(nil)
+
+	for _, body := range []string{`{"name":`, `{"name":"山田 太郎","surname":"太郎"}`} {
+		if rec := env.claim(body); rec.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want %d for %s", rec.Code, http.StatusBadRequest, body)
+		}
+	}
+
+	valid := `{"name":"山田 太郎","email":"taro@example.com","right":"other","details":"内容"}`
+	for range 2 {
+		if rec := env.claim(valid); rec.Code != http.StatusNoContent {
+			t.Fatalf("status = %d, want %d: the allowance was spent on a body that held no claim",
+				rec.Code, http.StatusNoContent)
+		}
 	}
 }
 

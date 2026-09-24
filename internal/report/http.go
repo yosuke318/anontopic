@@ -180,7 +180,16 @@ func (h *Handler) handleSubmit(w http.ResponseWriter, r *http.Request) {
 
 // handleSubmitClaim takes one claim from anyone, whether or not they hold a
 // session, within the rate one address may file them at.
+//
+// The rate is spent on a body that holds a claim, so that a request an address
+// never meant as one does not take its allowance. Reading the body cannot
+// reach the database and is bounded by maxClaimBytes.
 func (h *Handler) handleSubmitClaim(w http.ResponseWriter, r *http.Request) {
+	var req claimRequest
+	if !decodeJSON(w, r, &req, maxClaimBytes) {
+		return
+	}
+
 	allowed, wait, err := h.claims.AllowClaim(r.Context(), h.sessions.IPHash(r))
 	if err != nil {
 		slog.Error("read the claim rate", slog.Any("error", err))
@@ -190,11 +199,6 @@ func (h *Handler) handleSubmitClaim(w http.ResponseWriter, r *http.Request) {
 	if !allowed {
 		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Round(time.Second).Seconds())))
 		http.Error(w, "too many claims", http.StatusTooManyRequests)
-		return
-	}
-
-	var req claimRequest
-	if !decodeJSON(w, r, &req, maxClaimBytes) {
 		return
 	}
 
