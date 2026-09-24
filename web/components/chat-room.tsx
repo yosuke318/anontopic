@@ -62,6 +62,7 @@ const noticeMessages: Record<NoticeKind, string> = {
 
 const endedMessages: Record<string, string> = {
   user_left: "参加者がいなくなったため、会話は終了しました。",
+  reported: "参加者から通報があったため、会話は終了しました。",
 };
 
 const endedFallback = "会話は終了しました。";
@@ -170,6 +171,12 @@ export function ChatRoom({ conversationId, topics }: { conversationId: string; t
         ? current.filter((number) => number !== participant)
         : [...current, participant],
     );
+  }
+
+  // 通報した人には、ほかの参加者の発言をその場で見えなくする。通報を受けた会話は
+  // サーバー側で終了する。理由はdocs/adr/0021-end-and-keep-a-conversation-once-it-is-reported.mdにある。
+  function blockEveryoneElse() {
+    setBlocked(others);
   }
 
   // leaveは接続を閉じ、待機の割り当ても返す。会話そのものは、参加者が居なくなって
@@ -494,6 +501,7 @@ export function ChatRoom({ conversationId, topics }: { conversationId: string; t
         conversationId={conversationId}
         open={reporting}
         onClose={() => setReporting(false)}
+        onReported={blockEveryoneElse}
       />
     </div>
   );

@@ -1,60 +1,45 @@
 package topic
 
 import (
-	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
+
+	"github.com/yosuke318/anontopic/internal/adminauth"
 )
 
-const (
-	// adminAuthScheme prefixes the admin token in the Authorization header.
-	adminAuthScheme = "Bearer "
-
-	// maxRequestBytes caps an administration request body, which holds a name
-	// and a flag.
-	maxRequestBytes = 4 << 10
-)
+// maxRequestBytes caps an administration request body, which holds a name and
+// a flag.
+const maxRequestBytes = 4 << 10
 
 // Handler exposes the topic module's HTTP surface.
 type Handler struct {
-	svc *Service
-
-	// adminEnabled says whether a token is configured, and adminTokenSum is
-	// its digest. Holding the digest rather than the token gives the guard two
-	// values of equal length to compare, whatever the caller presents.
-	adminEnabled  bool
-	adminTokenSum [sha256.Size]byte
+	svc   *Service
+	admin adminauth.Guard
 }
 
 // NewHandler builds a handler around svc. adminToken is the secret the
 // administration endpoints require; when it is empty they are not served at
 // all, so a deployment without a secret has no write surface.
 func NewHandler(svc *Service, adminToken string) *Handler {
-	return &Handler{
-		svc:           svc,
-		adminEnabled:  adminToken != "",
-		adminTokenSum: sha256.Sum256([]byte(adminToken)),
-	}
+	return &Handler{svc: svc, admin: adminauth.New(adminToken)}
 }
 
 // Register mounts the module's routes onto mux.
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/topics", h.handleList)
 
-	if !h.adminEnabled {
+	if !h.admin.Enabled() {
 		return
 	}
 
-	mux.Handle("GET /api/admin/topics", h.requireAdmin(http.HandlerFunc(h.handleAdminList)))
-	mux.Handle("POST /api/admin/topics", h.requireAdmin(http.HandlerFunc(h.handleCreate)))
-	mux.Handle("PATCH /api/admin/topics/{id}", h.requireAdmin(http.HandlerFunc(h.handleUpdate)))
-	mux.Handle("DELETE /api/admin/topics/{id}", h.requireAdmin(http.HandlerFunc(h.handleDelete)))
+	mux.Handle("GET /api/admin/topics", h.admin.Require(http.HandlerFunc(h.handleAdminList)))
+	mux.Handle("POST /api/admin/topics", h.admin.Require(http.HandlerFunc(h.handleCreate)))
+	mux.Handle("PATCH /api/admin/topics/{id}", h.admin.Require(http.HandlerFunc(h.handleUpdate)))
+	mux.Handle("DELETE /api/admin/topics/{id}", h.admin.Require(http.HandlerFunc(h.handleDelete)))
 }
 
 // topicResponse is what the selection screen needs to draw one choice.
@@ -180,26 +165,6 @@ func (h *Handler) handleDelete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// requireAdmin rejects requests that do not carry the admin token.
-func (h *Handler) requireAdmin(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		presented, hasScheme := strings.CutPrefix(r.Header.Get("Authorization"), adminAuthScheme)
-
-		// Both sides are compared as digests, which are always the same
-		// length: ConstantTimeCompare gives up as soon as the lengths differ,
-		// so comparing the tokens themselves would time out faster for a
-		// guess of the wrong length and leak how long the secret is.
-		presentedSum := sha256.Sum256([]byte(presented))
-		if !hasScheme || subtle.ConstantTimeCompare(presentedSum[:], h.adminTokenSum[:]) != 1 {
-			w.Header().Set("WWW-Authenticate", "Bearer")
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-
-		next.ServeHTTP(w, r)
-	})
 }
 
 // topicID reads the ID from the request path.

@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/yosuke318/anontopic/internal/adminauth"
 )
 
 const testAdminToken = "test-admin-token"
@@ -31,7 +33,7 @@ func do(mux *http.ServeMux, method, target, body string, admin bool) *httptest.R
 		r = httptest.NewRequest(method, target, strings.NewReader(body))
 	}
 	if admin {
-		r.Header.Set("Authorization", adminAuthScheme+testAdminToken)
+		r.Header.Set("Authorization", adminauth.Scheme+testAdminToken)
 	}
 
 	rec := httptest.NewRecorder()
@@ -109,8 +111,8 @@ func TestAdminEndpointsRejectAWrongToken(t *testing.T) {
 	mux := newTestMux(t, newFakeRepository("雑談"), testAdminToken)
 
 	headers := map[string]string{
-		"a token of another length": adminAuthScheme + "short",
-		"a token of the same length": adminAuthScheme +
+		"a token of another length": adminauth.Scheme + "short",
+		"a token of the same length": adminauth.Scheme +
 			strings.Repeat("x", len(testAdminToken)),
 		"the token without the scheme": testAdminToken,
 		"another scheme":               "Basic " + testAdminToken,

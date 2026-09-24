@@ -1,4 +1,4 @@
--- 通報一覧の表示と削除バッチの動作確認に使うサンプル。
+-- 通報一覧・権利侵害の申し立て一覧の表示と、削除バッチの動作確認に使うサンプル。
 --
 -- 何度実行しても同じ状態になるよう、会話は ID を固定して ON CONFLICT DO NOTHING で入れ、
 -- 会話にぶら下がる行は「その会話が投入済みか」で判定する。既に投入された会話に
@@ -56,6 +56,7 @@ FROM (VALUES
 ) AS seed(conversation_id, session_token, joined_at)
 ON CONFLICT (conversation_id, session_token) DO NOTHING;
 
+-- 会話 2 は参加者 a が通報しているため、a 以外の発言は moderation_flag が 2（通報あり）。
 INSERT INTO messages (conversation_id, sender_token, body, moderation_flag, created_at)
 SELECT seed.conversation_id::uuid, seed.sender_token, seed.body, seed.moderation_flag, seed.created_at
 FROM (VALUES
@@ -63,9 +64,9 @@ FROM (VALUES
     ('11111111-1111-1111-1111-111111111111', 'devseed-conv1-participant-b', 'こんばんは、今日は寒いですね', 0, now() - interval '119 minutes'),
     ('11111111-1111-1111-1111-111111111111', 'devseed-conv1-participant-a', 'ほんとに。もう暖房つけました', 0, now() - interval '118 minutes'),
     ('22222222-2222-2222-2222-222222222222', 'devseed-conv2-participant-a', '相談したいことがあって', 0, now() - interval '1 day'),
-    ('22222222-2222-2222-2222-222222222222', 'devseed-conv2-participant-b', 'どうぞ', 0, now() - interval '1 day' + interval '1 minute'),
-    ('22222222-2222-2222-2222-222222222222', 'devseed-conv2-participant-b', 'うん', 0, now() - interval '1 day' + interval '2 minutes'),
-    ('22222222-2222-2222-2222-222222222222', 'devseed-conv2-participant-b', 'うん', 0, now() - interval '1 day' + interval '3 minutes'),
+    ('22222222-2222-2222-2222-222222222222', 'devseed-conv2-participant-b', 'どうぞ', 2, now() - interval '1 day' + interval '1 minute'),
+    ('22222222-2222-2222-2222-222222222222', 'devseed-conv2-participant-b', 'うん', 2, now() - interval '1 day' + interval '2 minutes'),
+    ('22222222-2222-2222-2222-222222222222', 'devseed-conv2-participant-b', 'うん', 2, now() - interval '1 day' + interval '3 minutes'),
     ('22222222-2222-2222-2222-222222222222', 'devseed-conv2-participant-c', '規約違反として通報された発言', 2, now() - interval '1 day' + interval '5 minutes'),
     ('33333333-3333-3333-3333-333333333333', 'devseed-conv3-participant-a', '最近やってるゲームある？', 0, now() - interval '100 days'),
     ('33333333-3333-3333-3333-333333333333', 'devseed-conv3-participant-b', 'ずっと同じのやってる', 0, now() - interval '100 days' + interval '2 minutes')
@@ -89,4 +90,19 @@ WHERE NOT EXISTS (
     SELECT 1
     FROM reports r
     WHERE r.conversation_id = '22222222-2222-2222-2222-222222222222'::uuid
+);
+
+-- 利用者ではない人から届いた権利侵害の申し立て。
+INSERT INTO infringement_claims (name, email, infringed_right, details, status, created_at)
+SELECT
+    '開発 用子',
+    'claimant@example.com',
+    'privacy',
+    '私の本名と勤務先が会話の中に書き込まれていたと知人から聞きました。削除をお願いします。',
+    'open',
+    now() - interval '3 hours'
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM infringement_claims c
+    WHERE c.email = 'claimant@example.com'
 );
