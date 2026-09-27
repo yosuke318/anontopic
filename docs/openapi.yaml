@@ -76,6 +76,12 @@ paths:
         すでに有効なセッションを持つ場合はトークンを作り直さず、無操作の期限だけを延長する。
 
         トークンはレスポンスボディには含めず、Set-Cookie でのみ返す。
+
+        あわせて端末IDを`anontopic_device`（HttpOnly、1 年）で返す。リクエストが
+        端末IDを持っていればそれを延長し、持っていなければ新しく発行する。端末IDは
+        セッションより長く残り、`banned_identifiers`の `device_fingerprint`として
+        段階的制裁の対象になる。理由は
+        [ADR-0025](adr/0025-escalate-sanctions-on-the-device-id-and-leave-address-bans-to-operators.md) にある。
       security:
         - {}
         - sessionCookie: []
@@ -89,6 +95,7 @@ paths:
                 type: string
                 examples:
                   - anontopic_session=SJKsX5FJzjvav6ZnhCUBzUa73VYgZwtxB8n3viIJdIg; Path=/; Max-Age=86400; HttpOnly; Secure; SameSite=Lax
+                  - anontopic_device=q2m3Lr0Q4v1Kx8b6tZyWcN5aHfUeJ7sD9gPiRo0lVkE; Path=/; Max-Age=31536000; HttpOnly; Secure; SameSite=Lax
           content:
             application/json:
               schema:
@@ -182,7 +189,9 @@ paths:
         "401":
           $ref: "#/components/responses/SessionUnauthorized"
         "403":
-          description: BAN された識別子からの要求
+          description: |
+            IP ハッシュまたは端末 ID に一時停止か恒久停止がかかっている。
+            一時停止は `banned_until` を過ぎると自動で解ける
           content:
             text/plain:
               schema:
@@ -286,6 +295,7 @@ paths:
         セッションを検証する前に 403 で拒否する。検証はセッションの寿命を延ばすため、
         他サイトのページが他人のセッションを延命できないようにしている。
         会話の参加者でない場合と、会話が存在しない場合は区別せず 403 を返す。
+        IP ハッシュまたは端末 ID に一時停止か恒久停止がかかっている場合も 403 を返す。
 
         接続後はテキストフレームで JSON をやり取りする。クライアントが送るのは
         メッセージのみで、サーバーからは以下の `type` が届く。サーバーは 30 秒ごとに
@@ -298,7 +308,8 @@ paths:
         | `participant_joined` | 誰かが入室した。自分の入室も届く |
         | `participant_left` | 誰かが退出した |
         | `message` | メッセージ。`participant`（送信者の番号）/ `body` / `sent_at` が入る。送信者にも同じものが届く |
-        | `ended` | 会話が終了した。`reason` は `conversations.end_reason` の値。これを最後にサーバーが接続を閉じる |
+        | `ended` | 会話が終了した。`reason` は `conversations.end_reason` の値。これを最後にサーバーが接続を閉じる。`reason` が `banned` のものは BAN された本人にだけ届き、会話は他の参加者の間で続く |
+        | `warning` | 運営からの警告。本人にだけ届く。NG ワードでのブロックが続いたとき、または接続していない間に警告が出ていたときに入室直後に届く |
         | `error` | 送信者だけに返る。`code` は `invalid_frame` / `empty_body` / `too_long` / `blocked` / `rate_limited` / `unavailable` |
 
         参加者は会話ごとの番号（1 起点）で表す。セッショントークンは他の参加者に渡らない。
@@ -310,6 +321,11 @@ paths:
         メッセージは配信された後にまとめて保存される。`sent_at` はサーバーが受け付けた
         時刻で、保存される時刻と同じものになる。理由は
         [ADR-0012](adr/0012-buffer-message-writes-into-batched-inserts.md) にある。
+
+        NG ワードでブロックされた送信は端末 ID ごとに数え、`SANCTION_BLOCKED_THRESHOLD`
+        （既定 5 通）に達するたびに警告 → 一時停止（`SANCTION_SUSPENSION`、既定 24 時間）→
+        恒久停止と段階を進める。一時停止以上になった接続には `ended`（`reason: banned`）を
+        送って閉じる。
 
         接続中の参加者が 1 人以下のまま `CHAT_REJOIN_GRACE` を過ぎると、会話は
         `user_left` で終了する。切断してから猶予の間は同じ会話に再接続でき、
@@ -337,7 +353,7 @@ paths:
                 examples:
                   - unauthorized
         "403":
-          description: 許可されていない Origin からの接続、または参加者でない会話への接続
+          description: 許可されていない Origin からの接続、参加者でない会話への接続、または BAN された識別子からの接続
           content:
             text/plain:
               schema:
@@ -781,6 +797,143 @@ paths:
         "500":
           $ref: "#/components/responses/InternalServerError"
 
+  /api/admin/bans:
+    get:
+      tags: [report]
+      operationId: listBans
+      summary: 制裁を新しい順に返す
+      description: |
+        警告・一時停止・恒久停止のすべてを返す。`active=true`を付けると、
+        いま効いている一時停止と恒久停止だけを返す。解除した制裁も記録として残る。
+      security:
+        - adminToken: []
+      parameters:
+        - name: active
+          in: query
+          description: true なら、いま効いている一時停止と恒久停止だけを返す
+          schema:
+            type: boolean
+        - $ref: "#/components/parameters/BeforeID"
+        - $ref: "#/components/parameters/ListLimit"
+      responses:
+        "200":
+          description: 制裁の一覧
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BanList"
+        "400":
+          description: "`active` / `before` / `limit` が読めない"
+          content:
+            text/plain:
+              schema:
+                type: string
+                examples:
+                  - invalid active
+        "401":
+          $ref: "#/components/responses/AdminUnauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    post:
+      tags: [report]
+      operationId: imposeBan
+      summary: 会話の参加者に制裁をかける
+      description: |
+        参加者は会話の中の番号（通報の確認画面の `participant`）で指す。識別子そのものは
+        運営に渡さないため、どちらの識別子にかけるかを `identifier_type` で選ぶ。
+
+        `ip_hash` は同じ回線（モバイル回線のゲートウェイ、学校など）の全員に効く。
+        自動の制裁は `device_fingerprint` にしかかけないため、回線ごと止める判断は
+        会話を読んだ運営が行う。理由は
+        [ADR-0025](adr/0025-escalate-sanctions-on-the-device-id-and-leave-address-bans-to-operators.md) にある。
+      security:
+        - adminToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BanCreate"
+      responses:
+        "201":
+          description: かけた制裁
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ban"
+        "400":
+          description: |
+            リクエストボディが不正、会話 ID が読めない、参加者番号が会話に無い、
+            または `identifier_type` / `sanction` / `duration_hours` / `reason` が不正
+          content:
+            text/plain:
+              schema:
+                type: string
+                examples:
+                  - unknown participant
+        "401":
+          $ref: "#/components/responses/AdminUnauthorized"
+        "409":
+          description: 参加者にその種類の識別子が記録されていない
+          content:
+            text/plain:
+              schema:
+                type: string
+                examples:
+                  - no identifier of that type is recorded for the participant
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/admin/bans/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: 制裁ID
+        schema:
+          type: integer
+          minimum: 1
+
+    delete:
+      tags: [report]
+      operationId: liftBan
+      summary: 制裁を解除する
+      description: |
+        行は消さずに `lifted_at` を記録する。解除した制裁は効かなくなり、
+        次の自動制裁の段階を決める数にも入らない。
+      security:
+        - adminToken: []
+      responses:
+        "200":
+          description: 解除した制裁
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ban"
+        "400":
+          $ref: "#/components/responses/InvalidSubmissionID"
+        "401":
+          $ref: "#/components/responses/AdminUnauthorized"
+        "404":
+          description: その ID の制裁が無い
+          content:
+            text/plain:
+              schema:
+                type: string
+                examples:
+                  - not found
+        "409":
+          description: すでに解除されている
+          content:
+            text/plain:
+              schema:
+                type: string
+                examples:
+                  - already lifted
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
 components:
   parameters:
     SubmissionID:
@@ -1159,6 +1312,101 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Claim"
+
+    BanCreate:
+      type: object
+      description: 運営が会話の参加者にかける制裁。
+      required: [conversation_id, participant, identifier_type, sanction]
+      additionalProperties: false
+      properties:
+        conversation_id:
+          type: string
+          format: uuid
+        participant:
+          type: integer
+          minimum: 1
+          description: 会話の中の参加者番号
+        identifier_type:
+          $ref: "#/components/schemas/IdentifierType"
+        sanction:
+          $ref: "#/components/schemas/Sanction"
+        duration_hours:
+          type: integer
+          minimum: 1
+          maximum: 8760
+          description: 一時停止の時間数。`suspension` では必須で、それ以外では指定しない
+        reason:
+          type: string
+          maxLength: 100
+          description: 制裁の理由。運営の記録として残す
+
+    Ban:
+      type: object
+      description: |
+        制裁 1 件。識別子そのものは運営にも返さない。
+      required: [id, identifier_type, sanction, source, reason, conversation_id, banned_until, created_at, lifted_at]
+      properties:
+        id:
+          type: integer
+          examples:
+            - 12
+        identifier_type:
+          $ref: "#/components/schemas/IdentifierType"
+        sanction:
+          $ref: "#/components/schemas/Sanction"
+        source:
+          type: string
+          enum: [ng_word, report, operator]
+          description: |
+            制裁のきっかけ。`ng_word` は NG ワードでのブロックの蓄積、
+            `report` は通報された会話の蓄積、`operator` は運営が管理 API からかけたもの
+        reason:
+          type: string
+          description: 運営が書いた理由。自動の制裁では空
+        conversation_id:
+          type:
+            - string
+            - "null"
+          format: uuid
+          description: 制裁のきっかけになった会話
+        banned_until:
+          type:
+            - string
+            - "null"
+          format: date-time
+          description: 一時停止の終了日時。警告と恒久停止では null
+        created_at:
+          type: string
+          format: date-time
+        lifted_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+          description: 運営が解除した日時。解除されていなければ null
+
+    BanList:
+      type: object
+      required: [bans]
+      properties:
+        bans:
+          type: array
+          items:
+            $ref: "#/components/schemas/Ban"
+
+    IdentifierType:
+      type: string
+      enum: [ip_hash, device_fingerprint]
+      description: |
+        `ip_hash` は接続元 IP の鍵付きハッシュで、同じ回線の全員に効く。
+        `device_fingerprint` はサーバーが Cookie で渡す端末 ID で、その端末にだけ効く
+
+    Sanction:
+      type: string
+      enum: [warning, suspension, permanent]
+      description: |
+        制裁の段階。`warning` はチャット画面に警告を出すだけで利用は止めない。
+        `suspension` は `banned_until` まで、`permanent` は無期限に接続とマッチングを拒否する
 
     MatchingState:
       type: object
