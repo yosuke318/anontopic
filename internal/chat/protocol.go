@@ -23,8 +23,13 @@ const (
 	eventParticipantLeft   = "participant_left"
 	// eventMessage carries one message to the room, its sender included.
 	eventMessage = "message"
-	// eventEnded is the last event of a conversation.
+	// eventEnded is the last event of a conversation. It reaches a single
+	// connection when its participant was banned, and ends the conversation
+	// for that participant alone.
 	eventEnded = "ended"
+	// eventWarning tells a participant that a warning was given to them, and
+	// reaches nobody else.
+	eventWarning = "warning"
 	// eventError answers the sender of a frame that was not delivered, and
 	// reaches nobody else.
 	eventError = "error"
@@ -56,8 +61,9 @@ type serverEvent struct {
 	Body   string     `json:"body,omitempty"`
 	SentAt *time.Time `json:"sent_at,omitempty"`
 	// Reason is set on eventEnded, where it holds a value of
-	// conversations.end_reason, and on eventError of codeBlocked, where it
-	// holds what the Moderator said the message was blocked for.
+	// conversations.end_reason or endReasonBanned, and on eventError of
+	// codeBlocked, where it holds what the Moderator said the message was
+	// blocked for.
 	Reason string `json:"reason,omitempty"`
 	// Code and Message are set on eventError.
 	Code    string `json:"code,omitempty"`

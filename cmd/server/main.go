@@ -115,7 +115,7 @@ func run() error {
 
 	filter := newModerationService(ctx, pool)
 
-	chats := newChatService(pool, rdb, limits, filter)
+	chats := newChatService(pool, rdb, limits, filter, bans)
 
 	// Only a participant of a conversation may report it, and the chat module
 	// is what knows who those are and holds what was said.
@@ -197,12 +197,13 @@ func handleReady(pool *pgxpool.Pool, rdb *redis.Client) http.HandlerFunc {
 }
 
 // newChatService builds the chat module from the environment.
-func newChatService(pool *pgxpool.Pool, rdb *redis.Client, limits *capacity.Service, filter *moderation.Service) *chat.Service {
+func newChatService(pool *pgxpool.Pool, rdb *redis.Client, limits *capacity.Service, filter *moderation.Service, bans *report.Bans) *chat.Service {
 	return chat.NewService(
 		chat.NewPostgresRepository(pool),
 		chat.NewRedisStore(rdb),
 		moderator{filter},
 		limits,
+		chatSanctions{bans},
 		chat.Options{
 			RejoinGrace: envDuration("CHAT_REJOIN_GRACE", chat.DefaultRejoinGrace),
 		},
@@ -245,6 +246,35 @@ func (s sessionIdentities) Identity(ctx context.Context, token string) (matching
 		return matching.Identity{}, err
 	}
 	return matching.Identity{IPHash: sess.IPHash, Device: sess.Device}, nil
+}
+
+// chatSanctions carries what the chat module asks of the ban list to the
+// report module, and the sanction it answers with into the chat module's
+// terms: a suspension and a permanent ban both end the connection.
+type chatSanctions struct {
+	bans *report.Bans
+}
+
+func (c chatSanctions) IsBanned(ctx context.Context, id chat.Identity) (bool, error) {
+	return c.bans.IsBanned(ctx, report.Identity(id))
+}
+
+func (c chatSanctions) RecordBlocked(ctx context.Context, id chat.Identity) (chat.Sanction, error) {
+	sanction, err := c.bans.RecordBlocked(ctx, report.Identity(id))
+	switch {
+	case err != nil:
+		return chat.SanctionNone, err
+	case sanction == report.SanctionWarning:
+		return chat.SanctionWarning, nil
+	case sanction == report.SanctionSuspension, sanction == report.SanctionPermanent:
+		return chat.SanctionBan, nil
+	default:
+		return chat.SanctionNone, nil
+	}
+}
+
+func (c chatSanctions) TakeWarning(ctx context.Context, id chat.Identity) (bool, error) {
+	return c.bans.TakeWarning(ctx, report.Identity(id))
 }
 
 // newModerationService builds the filter every message passes before its room
