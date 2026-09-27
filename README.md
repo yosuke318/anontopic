@@ -219,7 +219,45 @@ curl -H "Authorization: Bearer $TOKEN" 'localhost:8080/api/admin/claims?status=o
 ```
 
 会話ログでは参加者をルーム内の番号で示し、セッショントークンは返さない。
-通報が重なった利用者への制裁はまだ実装していない。
+
+### BAN と段階的制裁
+
+制裁は警告 → 一時停止 → 恒久停止の 3 段階で、`banned_identifiers` に 1 段階 1 行で残す。
+一時停止と恒久停止がかかった識別子は、マッチング（`POST /api/matching`）と
+WebSocket のハンドシェイクで 403 になる。一時停止は `banned_until` を過ぎると自動で解ける。
+判定結果は Redis に `SANCTION_BAN_CACHE_TTL`（既定 1 分、一時停止の残り時間より長くは
+置かない）だけ置き、BAN と解除のたびに消す。
+
+識別子は 2 種類ある。
+
+| 識別子 | 中身 | 効く範囲 |
+| --- | --- | --- |
+| `device_fingerprint` | `POST /api/session` が `anontopic_device` Cookie（1 年）で渡す端末 ID | その端末だけ |
+| `ip_hash` | 接続元 IP の鍵付きハッシュ | 同じ回線（モバイル回線・学校など）の全員 |
+
+自動の制裁は端末 ID にだけかけ、IP ハッシュへの BAN は会話を読んだ運営が管理 API から
+かける。共有 IP の巻き込みを避けるためで、理由は
+[ADR-0025](docs/adr/0025-escalate-sanctions-on-the-device-id-and-leave-address-bans-to-operators.md) にある。
+
+| きっかけ | しきい値（既定） | 数える単位 |
+| --- | --- | --- |
+| NG ワードでブロックされた送信 | 最初の 1 通から 1 時間のうちに 5 通（`SANCTION_BLOCKED_*`） | 送信者の端末 ID |
+| 通報された会話 | 最初の 1 件から 7 日のうちに 3 会話（`SANCTION_REPORTED_*`） | 通報者以外の参加者の端末 ID |
+
+しきい値に達するたびに、解除されていない制裁の数で次の段階を決める（0 件なら警告、
+1 件なら `SANCTION_SUSPENSION`（既定 24 時間）の一時停止、2 件以上なら恒久停止）。
+警告はチャット画面に `warning` イベントで出し、接続していない間に出た警告は次に部屋へ
+入ったときに出す。会話中に一時停止以上になった参加者には `ended`（`reason: banned`）を
+送って接続を閉じ、会話はほかの参加者の間で続く。
+
+```bash
+# 会話の参加者 2 番の端末 ID を 72 時間止める（participant は会話ログの番号）
+curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"conversation_id":"<会話ID>","participant":2,"identifier_type":"device_fingerprint","sanction":"suspension","duration_hours":72,"reason":"外部への誘導"}' \
+  localhost:8080/api/admin/bans
+curl -H "Authorization: Bearer $TOKEN" 'localhost:8080/api/admin/bans?active=true'
+curl -X DELETE -H "Authorization: Bearer $TOKEN" localhost:8080/api/admin/bans/1   # 解除
+```
 
 ### 接続数の上限とレート制限
 
