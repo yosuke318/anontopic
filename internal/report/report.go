@@ -12,6 +12,10 @@
 // Conversations; the reasoning is in
 // docs/adr/0021-end-and-keep-a-conversation-once-it-is-reported.md.
 //
+// The module also keeps the ban list in banned_identifiers, which Bans reads
+// and writes. A report counts against the other participants of the
+// conversation towards their next sanction.
+//
 // Boundary: reports reference rooms, messages and users by ID only.
 package report
 
@@ -19,6 +23,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"time"
 )
@@ -188,6 +193,17 @@ type Conversations interface {
 
 	// Transcript reads the conversation and every message recorded in it.
 	Transcript(ctx context.Context, conversationID string) (Transcript, error)
+
+	// Participants reads every participant of the conversation, in the order
+	// the room numbers them from one.
+	Participants(ctx context.Context, conversationID string) ([]Participant, error)
+}
+
+// Participant is one participant of a conversation together with the
+// identifiers recorded when the room was formed.
+type Participant struct {
+	Token    string
+	Identity Identity
 }
 
 // Service takes the reports participants file against a conversation and the
@@ -195,12 +211,14 @@ type Conversations interface {
 type Service struct {
 	repo          Repository
 	conversations Conversations
+	bans          *Bans
 }
 
 // NewService builds a report service that records into repo and asks
-// conversations about the conversations reports name.
-func NewService(repo Repository, conversations Conversations) *Service {
-	return &Service{repo: repo, conversations: conversations}
+// conversations about the conversations reports name. A nil bans counts no
+// report towards a sanction, and serves no ban to operators.
+func NewService(repo Repository, conversations Conversations, bans *Bans) *Service {
+	return &Service{repo: repo, conversations: conversations, bans: bans}
 }
 
 // Submit records a report of conversationID by the participant behind token,
@@ -242,7 +260,74 @@ func (s *Service) Submit(ctx context.Context, conversationID, token, reason stri
 		return fmt.Errorf("end reported conversation: %w", err)
 	}
 
+	s.countAgainstOthers(ctx, conversationID, token)
 	return nil
+}
+
+// countAgainstOthers counts the conversation towards the next sanction of
+// every participant other than the reporter. The report itself is recorded
+// by then, so a count that fails is logged rather than failing the report.
+func (s *Service) countAgainstOthers(ctx context.Context, conversationID, reporterToken string) {
+	if s.bans == nil {
+		return
+	}
+
+	participants, err := s.conversations.Participants(ctx, conversationID)
+	if err != nil {
+		slog.Error("read participants of reported conversation",
+			slog.String("conversation_id", conversationID), slog.Any("error", err))
+		return
+	}
+
+	for _, p := range participants {
+		if p.Token == reporterToken {
+			continue
+		}
+		if _, err := s.bans.RecordReported(ctx, p.Identity, conversationID); err != nil {
+			slog.Error("count report towards sanction",
+				slog.String("conversation_id", conversationID), slog.Any("error", err))
+		}
+	}
+}
+
+// BanParticipant imposes a sanction an operator decided on one participant of
+// a conversation, named by their number in the room, on the identifier of
+// the type imp asks for.
+func (s *Service) BanParticipant(ctx context.Context, conversationID string, participant int, imp Imposition) (Ban, error) {
+	if err := validateImposition(imp); err != nil {
+		return Ban{}, err
+	}
+
+	participants, err := s.conversations.Participants(ctx, conversationID)
+	if err != nil {
+		return Ban{}, fmt.Errorf("read participants: %w", err)
+	}
+	if participant < 1 || participant > len(participants) {
+		return Ban{}, ErrUnknownParticipant
+	}
+
+	identifier := participants[participant-1].Identity.identifier(imp.IdentifierType)
+	if identifier == "" {
+		return Ban{}, ErrNoIdentifier
+	}
+
+	imp.ConversationID = conversationID
+	return s.bans.Impose(ctx, identifier, imp)
+}
+
+// ListBans returns the bans f keeps.
+func (s *Service) ListBans(ctx context.Context, f BanFilter) ([]Ban, error) {
+	return s.bans.List(ctx, f)
+}
+
+// LiftBan ends the sanction id names.
+func (s *Service) LiftBan(ctx context.Context, id int64) (Ban, error) {
+	return s.bans.Lift(ctx, id)
+}
+
+// ServesBans reports whether the service was given a ban list.
+func (s *Service) ServesBans() bool {
+	return s.bans != nil
 }
 
 // List returns the reports f keeps.
