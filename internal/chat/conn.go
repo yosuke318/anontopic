@@ -145,7 +145,8 @@ func (c *conn) writeLoop() {
 
 // heartbeatLoop keeps this participant counted as connected, and ends the
 // conversation once it has had nobody to talk to for longer than the rejoin
-// grace.
+// grace. It also looks for a ban on the participant, so that one who only
+// reads is cut off as well.
 func (c *conn) heartbeatLoop(ctx context.Context) {
 	ticker := time.NewTicker(c.svc.presenceInterval)
 	defer ticker.Stop()
@@ -154,6 +155,10 @@ func (c *conn) heartbeatLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ticker.C:
+			if c.svc.cutOffIfBanned(ctx, c) {
+				return
+			}
+
 			now := c.svc.now().UTC()
 
 			connected, err := c.svc.store.Heartbeat(ctx, c.conversationID, c.token, now, c.svc.presenceTTL)

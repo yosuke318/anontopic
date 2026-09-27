@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -150,5 +151,69 @@ func TestABannedParticipantIsCutOffWhileTheRoomCarriesOn(t *testing.T) {
 	// The ban ends the conversation for the banned participant alone.
 	if endedAt, _ := repo.ending(); !endedAt.IsZero() {
 		t.Fatalf("the conversation was recorded as ended at %v", endedAt)
+	}
+}
+
+func TestABanImposedWhileConnectedCutsTheParticipantOffAtTheirNextFrame(t *testing.T) {
+	repo := newFakeRepository(tokenAlice, tokenBob)
+	sanctions := &stubSanctions{}
+
+	// The heartbeat is left out of the way, so that it is the frame that
+	// finds the ban.
+	opts := testOptions()
+	opts.PresenceInterval = time.Hour
+	srv := newSanctionedTestServer(t, repo, newFakeStore(), nil, nil, sanctions, opts, tokenAlice, tokenBob)
+
+	alice := dial(t, srv, repo.conv.ID, tokenAlice)
+	bob := dial(t, srv, repo.conv.ID, tokenBob)
+	await(t, alice, eventJoined)
+	await(t, bob, eventJoined)
+
+	// A frame sent before the ban goes through.
+	send(t, alice, clientFrame{Type: frameMessage, Body: "こんにちは"})
+	await(t, bob, eventMessage)
+
+	sanctions.mu.Lock()
+	sanctions.banned = true
+	sanctions.mu.Unlock()
+
+	send(t, alice, clientFrame{Type: frameMessage, Body: "まだ話せますか"})
+
+	if ev, _ := await(t, alice, eventEnded); ev.Reason != endReasonBanned {
+		t.Fatalf("reason = %q, want %q", ev.Reason, endReasonBanned)
+	}
+	if _, _, err := alice.ReadMessage(); err == nil {
+		t.Fatal("the connection of the banned participant stayed open")
+	}
+
+	// The frame that found the ban is not delivered, and the room carries on.
+	if ev, _ := await(t, bob, eventParticipantLeft); ev.Participant != 1 {
+		t.Fatalf("participant = %d, want 1", ev.Participant)
+	}
+	if got := awaitRecorded(t, repo, 1); len(got) != 1 || got[0].body != "こんにちは" {
+		t.Fatalf("recorded %+v, want only the message sent before the ban", got)
+	}
+}
+
+func TestABanImposedWhileConnectedCutsOffAParticipantWhoOnlyReads(t *testing.T) {
+	repo := newFakeRepository(tokenAlice, tokenBob)
+	sanctions := &stubSanctions{}
+	srv := newSanctionedTestServer(t, repo, newFakeStore(), nil, nil, sanctions, testOptions(), tokenAlice, tokenBob)
+
+	alice := dial(t, srv, repo.conv.ID, tokenAlice)
+	bob := dial(t, srv, repo.conv.ID, tokenBob)
+	await(t, alice, eventJoined)
+	await(t, bob, eventJoined)
+
+	// Alice sends nothing at all, so only the heartbeat can find the ban.
+	sanctions.mu.Lock()
+	sanctions.banned = true
+	sanctions.mu.Unlock()
+
+	if ev, _ := await(t, alice, eventEnded); ev.Reason != endReasonBanned {
+		t.Fatalf("reason = %q, want %q", ev.Reason, endReasonBanned)
+	}
+	if _, _, err := alice.ReadMessage(); err == nil {
+		t.Fatal("the connection of the banned participant stayed open")
 	}
 }

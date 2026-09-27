@@ -213,7 +213,9 @@ components:
         理由は [ADR-0021](adr/0021-end-and-keep-a-conversation-once-it-is-reported.md) にある。
 
         参加者が会話の途中で一時停止か恒久停止になった場合は、`reason: banned` がその
-        参加者にだけ届き、その接続だけが閉じる。他の参加者には `participant_left` が届き、
+        参加者にだけ届き、その接続だけが閉じる。NG ワードでのブロックが続いた場合は
+        その場で切る。運営が管理 API でかけた BAN や、通報が重なった場合は、接続中の参加者を
+        5 秒おきに確認しているため、長くても 5 秒ほどで切れる（その間に送信があれば、その時点で切る）。
         会話は続く。
       contentType: application/json
       payload:
