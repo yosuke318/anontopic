@@ -19,6 +19,8 @@ out/
 crash.log
 *.tfvars
 !example.tfvars
+*.tfbackend
+!example.tfbackend
 
 # Environment
 .env

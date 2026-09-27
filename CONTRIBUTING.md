@@ -61,6 +61,12 @@ import してもよい。
   通常は意識しなくてよい。クローン直後にエディタが `LayoutProps` 等を解決できない場合は
   `cd web && npx next typegen` を実行する。
 
+### Terraform
+
+- フォーマットは `terraform fmt`。push 前に `make infra-check`（fmt の検査と validate）が通ることを確認する。
+- アカウント ID・バケット名などアカウント固有の値はコードに書かない。置き場所は
+  [infra/README.md](./infra/README.md) を参照。
+
 まとめて確認する場合は `make check` を使う。
 
 コミット前の軽い検査は `.githooks/pre-commit` にある。`make hooks` で有効になる。

@@ -18,7 +18,7 @@ Goのモジュラーモノリス（バックエンド）とNext.js（フロン�
 │   ├── adminauth/       # 管理APIのトークン検査（各モジュールの管理ハンドラが使う）
 │   └── retention/       # 保持期間を過ぎたデータの削除
 ├── web/                 # Next.js（App Router / TypeScript / Tailwind CSS）
-├── infra/               # Terraform（M3で使用）
+├── infra/               # Terraform（AWS。手順は infra/README.md）
 └── db/
     ├── migrations/      # スキーマ変更
     └── seeds/           # 初期データ
@@ -31,6 +31,7 @@ Goのモジュラーモノリス（バックエンド）とNext.js（フロン�
 | Go | 1.26以上 |
 | Node.js | 22以上 |
 | golangci-lint | 2系 |
+| Terraform | 1.15系 |
 
 ## ローカル環境（Docker Compose）
 

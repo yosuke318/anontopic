@@ -8,6 +8,7 @@ on:
 env:
   GO_VERSION: "1.26"
   NODE_VERSION: "22"
+  TERRAFORM_VERSION: "1.15.8"
 
 jobs:
   backend-lint:
@@ -104,3 +105,52 @@ jobs:
       - run: npm ci
       - run: npm test --if-present
       - run: npm run build
+
+  infra-check:
+    name: インフラ fmt / validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+      - run: make infra-check
+
+  infra-plan:
+    name: インフラ plan (${{ matrix.env }})
+    needs: infra-check
+    # フォークからの pull request には OIDC のトークンもシークレットも渡らない。
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [dev, prod]
+    defaults:
+      run:
+        working-directory: infra/environments/${{ matrix.env }}
+    # アカウント ID とバケット名はシークレットに置き、ログ上では伏せ字にする。
+    env:
+      TF_VAR_aws_account_id: ${{ secrets.AWS_ACCOUNT_ID }}
+      TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/anontopic-terraform-plan
+          aws-region: ap-northeast-1
+      - run: terraform init -input=false -lockfile=readonly -backend-config="bucket=$TF_STATE_BUCKET"
+      # 公開リポジトリの Actions のログは誰でも読める。差分の中身は出さず、件数の行だけを出す。
+      # 中身はローカルの make infra-plan で確かめる。
+      - name: terraform plan
+        run: |
+          terraform plan -input=false -no-color -lock-timeout=60s > plan.txt
+          grep -E '^(Plan:|No changes\.)' plan.txt
