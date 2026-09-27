@@ -28,8 +28,9 @@ LOAD_RESULT ?= test/load/results/latest.bin
 
 # Terraform のルートモジュール。infra-check はこのすべてを validate する。
 TERRAFORM_ROOTS := infra/bootstrap infra/environments/dev infra/environments/prod
-# infra-plan の対象環境。make infra-plan ENV=prod のように上書きする。
-ENV ?= dev
+# infra-plan の対象環境。シェルの環境変数 ENV と衝突しないよう専用の名前にしている。
+# make infra-plan INFRA_ENV=prod のように上書きする。
+INFRA_ENV ?= dev
 
 help: ## Show available targets
 	@grep -hE '^[^ 	#]+:.*## ' $(MAKEFILE_LIST) \
@@ -143,9 +144,9 @@ infra-check: ## Check the Terraform formatting and validate every root module
 		terraform -chdir=$$dir validate -no-color || exit 1; \
 	done
 
-infra-plan: ## Run terraform plan for ENV (dev / prod) against the remote state
-	terraform -chdir=infra/environments/$(ENV) init -input=false -lockfile=readonly -backend-config=backend.tfbackend
-	terraform -chdir=infra/environments/$(ENV) plan -input=false
+infra-plan: ## Run terraform plan for INFRA_ENV (dev / prod) against the remote state
+	terraform -chdir=infra/environments/$(INFRA_ENV) init -input=false -lockfile=readonly -backend-config=backend.tfbackend
+	terraform -chdir=infra/environments/$(INFRA_ENV) plan -input=false
 
 # --- 負荷テスト -----------------------------------------------------------
 

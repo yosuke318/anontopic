@@ -79,17 +79,17 @@ cd infra/environments/dev
 cp example.tfvars terraform.tfvars
 cp example.tfbackend backend.tfbackend
 cd ../../..
-make infra-plan ENV=dev
+make infra-plan INFRA_ENV=dev
 ```
 
-prod も同じ手順で `ENV=prod` にする。
+prod も同じ手順で `INFRA_ENV=prod` にする。
 
 ## 日々の作業
 
 ```bash
 make infra-fmt                # 整形
 make infra-check              # fmt の検査と validate（AWS の認証情報は要らない）
-make infra-plan ENV=dev       # リモートの state に対して plan を取る
+make infra-plan INFRA_ENV=dev  # リモートの state に対して plan を取る
 ```
 
 プロバイダのバージョンは各ルートモジュールの `.terraform.lock.hcl` で固定している。
