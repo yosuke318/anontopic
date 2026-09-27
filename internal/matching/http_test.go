@@ -29,6 +29,10 @@ func (fakeSessions) IPHash(r *http.Request) string {
 	return "ip-hash-" + r.Header.Get(testTokenHeader)
 }
 
+func (fakeSessions) DeviceID(r *http.Request) string {
+	return "device-" + r.Header.Get(testTokenHeader)
+}
+
 // newTestMux serves the module the way main.go does, so that the tests go
 // through the routing.
 func newTestMux(t *testing.T, svc *Service) *http.ServeMux {
@@ -153,7 +157,7 @@ func TestEndpointsRefuseARequestWithoutASession(t *testing.T) {
 
 func TestJoinEndpointRefusesRequestsItCannotQueue(t *testing.T) {
 	svc := NewService(newFakeStore(), newFakeRepository(), fakeTopics{active: []int{1}},
-		fakeBans{banned: []string{"ip-hash-banned"}}, nil, Options{})
+		fakeBans{banned: []string{"ip-hash-banned"}}, nil, nil, Options{})
 	mux := newTestMux(t, svc)
 
 	cases := []struct {
@@ -206,7 +210,7 @@ func TestJoinEndpointAnswersAnAddressAskingTooOften(t *testing.T) {
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
 			svc := NewService(newFakeStore(), newFakeRepository(), fakeTopics{active: []int{1}},
-				fakeBans{}, &fakeRate{retryAfter: c.retryAfter}, Options{})
+				fakeBans{}, nil, &fakeRate{retryAfter: c.retryAfter}, Options{})
 			mux := newTestMux(t, svc)
 
 			rec := do(mux, http.MethodPost, "/api/matching", "alice", `{"topic_id":1,"room_type":2}`)

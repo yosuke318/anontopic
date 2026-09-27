@@ -166,15 +166,15 @@ func (s *fakeStore) queueOf(token string) Queue {
 type fakeRepository struct {
 	mu            sync.Mutex
 	conversations []Conversation
-	participants  map[string][]string
+	participants  map[string][]Participant
 	err           error
 }
 
 func newFakeRepository() *fakeRepository {
-	return &fakeRepository{participants: make(map[string][]string)}
+	return &fakeRepository{participants: make(map[string][]Participant)}
 }
 
-func (r *fakeRepository) CreateConversation(_ context.Context, topicID int, participants []string) (Conversation, error) {
+func (r *fakeRepository) CreateConversation(_ context.Context, topicID int, participants []Participant) (Conversation, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -226,24 +226,37 @@ func (r *fakeRate) AllowMatch(_ context.Context, subject string) (bool, time.Dur
 	return false, r.retryAfter, nil
 }
 
-// fakeBans answers for a fixed set of banned hashes.
+// fakeBans answers for a fixed set of banned identifiers.
 type fakeBans struct {
 	banned []string
 	err    error
 }
 
-func (b fakeBans) IsBanned(_ context.Context, ipHash string) (bool, error) {
+func (b fakeBans) IsBanned(_ context.Context, id Identity) (bool, error) {
 	if b.err != nil {
 		return false, b.err
 	}
-	return slices.Contains(b.banned, ipHash), nil
+	return slices.Contains(b.banned, id.IPHash) || slices.Contains(b.banned, id.Device), nil
+}
+
+// fakeIdentities names every token's identifiers after the token, and knows
+// nothing of the tokens in missing.
+type fakeIdentities struct {
+	missing []string
+}
+
+func (f fakeIdentities) Identity(_ context.Context, token string) (Identity, error) {
+	if slices.Contains(f.missing, token) {
+		return Identity{}, errors.New("no such session")
+	}
+	return Identity{IPHash: "ip-hash-" + token, Device: "device-" + token}, nil
 }
 
 // newTestService builds a Service whose clock the test drives.
 func newTestService(t *testing.T, store Store, repo Repository) (*Service, *testClock) {
 	t.Helper()
 
-	svc := NewService(store, repo, fakeTopics{active: []int{1, 2}}, fakeBans{}, nil, Options{})
+	svc := NewService(store, repo, fakeTopics{active: []int{1, 2}}, fakeBans{}, nil, nil, Options{})
 	clock := &testClock{current: time.Unix(1_700_000_000, 0).UTC()}
 	svc.now = clock.Now
 
@@ -254,7 +267,7 @@ func newTestService(t *testing.T, store Store, repo Repository) (*Service, *test
 func join(t *testing.T, svc *Service, token string, q Queue) State {
 	t.Helper()
 
-	state, err := svc.Join(context.Background(), token, "ip-hash-"+token, q)
+	state, err := svc.Join(context.Background(), token, Identity{IPHash: "ip-hash-" + token, Device: "device-" + token}, q)
 	if err != nil {
 		t.Fatalf("Join(%s): %v", token, err)
 	}
@@ -379,7 +392,7 @@ func TestAWaitThatRanOutIsNoLongerWaiting(t *testing.T) {
 func TestJoinRefusesARoomTypeNoConversationCanHave(t *testing.T) {
 	svc, _ := newTestService(t, newFakeStore(), newFakeRepository())
 
-	_, err := svc.Join(context.Background(), "alice", "ip-hash", Queue{TopicID: 1, RoomType: 4})
+	_, err := svc.Join(context.Background(), "alice", Identity{IPHash: "ip-hash"}, Queue{TopicID: 1, RoomType: 4})
 	if !errors.Is(err, ErrInvalidRoomType) {
 		t.Fatalf("err = %v, want %v", err, ErrInvalidRoomType)
 	}
@@ -388,7 +401,7 @@ func TestJoinRefusesARoomTypeNoConversationCanHave(t *testing.T) {
 func TestJoinRefusesATopicThatIsNotOffered(t *testing.T) {
 	svc, _ := newTestService(t, newFakeStore(), newFakeRepository())
 
-	_, err := svc.Join(context.Background(), "alice", "ip-hash", Queue{TopicID: 99, RoomType: 2})
+	_, err := svc.Join(context.Background(), "alice", Identity{IPHash: "ip-hash"}, Queue{TopicID: 99, RoomType: 2})
 	if !errors.Is(err, ErrUnknownTopic) {
 		t.Fatalf("err = %v, want %v", err, ErrUnknownTopic)
 	}
@@ -397,9 +410,9 @@ func TestJoinRefusesATopicThatIsNotOffered(t *testing.T) {
 func TestJoinKeepsABannedIdentifierOutOfTheQueue(t *testing.T) {
 	store := newFakeStore()
 	svc := NewService(store, newFakeRepository(), fakeTopics{active: []int{1}},
-		fakeBans{banned: []string{"banned-hash"}}, nil, Options{})
+		fakeBans{banned: []string{"banned-hash"}}, nil, nil, Options{})
 
-	_, err := svc.Join(context.Background(), "alice", "banned-hash", Queue{TopicID: 1, RoomType: 2})
+	_, err := svc.Join(context.Background(), "alice", Identity{IPHash: "banned-hash"}, Queue{TopicID: 1, RoomType: 2})
 	if !errors.Is(err, ErrBanned) {
 		t.Fatalf("err = %v, want %v", err, ErrBanned)
 	}
@@ -418,7 +431,7 @@ func TestJoinRefusesAUserWaitingInAnotherQueue(t *testing.T) {
 
 	join(t, svc, "alice", Queue{TopicID: 1, RoomType: 2})
 
-	_, err := svc.Join(context.Background(), "alice", "ip-hash", Queue{TopicID: 2, RoomType: 2})
+	_, err := svc.Join(context.Background(), "alice", Identity{IPHash: "ip-hash"}, Queue{TopicID: 2, RoomType: 2})
 	if !errors.Is(err, ErrAlreadyWaiting) {
 		t.Fatalf("err = %v, want %v", err, ErrAlreadyWaiting)
 	}
@@ -444,7 +457,7 @@ func TestJoinRefusesAUserWhoAlreadyHasAConversation(t *testing.T) {
 	join(t, svc, "alice", q)
 	join(t, svc, "bob", q)
 
-	_, err := svc.Join(context.Background(), "alice", "ip-hash", q)
+	_, err := svc.Join(context.Background(), "alice", Identity{IPHash: "ip-hash"}, q)
 	if !errors.Is(err, ErrAlreadyMatched) {
 		t.Fatalf("err = %v, want %v", err, ErrAlreadyMatched)
 	}
@@ -495,7 +508,7 @@ func TestLeaveReleasesTheRoomSoTheUserCanQueueAgain(t *testing.T) {
 		t.Fatalf("kind = %v, want %v", state.Kind, StateIdle)
 	}
 
-	again, err := svc.Join(context.Background(), "alice", "ip-hash", q)
+	again, err := svc.Join(context.Background(), "alice", Identity{IPHash: "ip-hash"}, q)
 	if err != nil {
 		t.Fatalf("Join: %v", err)
 	}
@@ -513,7 +526,7 @@ func TestAConversationThatCannotBeWrittenReturnsItsParticipants(t *testing.T) {
 
 	join(t, svc, "alice", q)
 
-	if _, err := svc.Join(context.Background(), "bob", "ip-hash", q); err == nil {
+	if _, err := svc.Join(context.Background(), "bob", Identity{IPHash: "ip-hash"}, q); err == nil {
 		t.Fatal("Join: want the failure of the conversation to be reported")
 	}
 
@@ -531,14 +544,14 @@ func TestAConversationThatCannotBeWrittenReturnsItsParticipants(t *testing.T) {
 func TestJoinHoldsBackAnAddressAskingTooOften(t *testing.T) {
 	store := newFakeStore()
 	rate := &fakeRate{allow: true}
-	svc := NewService(store, newFakeRepository(), fakeTopics{active: []int{1}}, fakeBans{}, rate, Options{})
+	svc := NewService(store, newFakeRepository(), fakeTopics{active: []int{1}}, fakeBans{}, nil, rate, Options{})
 
-	if _, err := svc.Join(context.Background(), "alice", "one-network", Queue{TopicID: 1, RoomType: 2}); err != nil {
+	if _, err := svc.Join(context.Background(), "alice", Identity{IPHash: "one-network"}, Queue{TopicID: 1, RoomType: 2}); err != nil {
 		t.Fatalf("Join: %v", err)
 	}
 
 	rate.allow = false
-	_, err := svc.Join(context.Background(), "bob", "one-network", Queue{TopicID: 1, RoomType: 2})
+	_, err := svc.Join(context.Background(), "bob", Identity{IPHash: "one-network"}, Queue{TopicID: 1, RoomType: 2})
 	if !errors.Is(err, ErrTooManyRequests) {
 		t.Fatalf("err = %v, want %v", err, ErrTooManyRequests)
 	}
@@ -557,5 +570,44 @@ func TestJoinHoldsBackAnAddressAskingTooOften(t *testing.T) {
 	want := []string{"one-network", "one-network"}
 	if len(rate.subjects) != len(want) || rate.subjects[0] != want[0] || rate.subjects[1] != want[1] {
 		t.Fatalf("subjects = %v, want %v", rate.subjects, want)
+	}
+}
+
+func TestJoinKeepsABannedDeviceOutOfTheQueue(t *testing.T) {
+	svc := NewService(newFakeStore(), newFakeRepository(), fakeTopics{active: []int{1}},
+		fakeBans{banned: []string{"banned-device"}}, nil, nil, Options{})
+
+	id := Identity{IPHash: "shared-network", Device: "banned-device"}
+	_, err := svc.Join(context.Background(), "alice", id, Queue{TopicID: 1, RoomType: 2})
+	if !errors.Is(err, ErrBanned) {
+		t.Fatalf("err = %v, want %v", err, ErrBanned)
+	}
+
+	// Another device behind the same address is not caught by the ban.
+	other := Identity{IPHash: "shared-network", Device: "other-device"}
+	if _, err := svc.Join(context.Background(), "bob", other, Queue{TopicID: 1, RoomType: 2}); err != nil {
+		t.Fatalf("Join of another device: %v", err)
+	}
+}
+
+func TestARoomRecordsTheIdentifiersOfItsParticipants(t *testing.T) {
+	repo := newFakeRepository()
+	svc := NewService(newFakeStore(), repo, fakeTopics{active: []int{1}}, fakeBans{},
+		fakeIdentities{missing: []string{"bob"}}, nil, Options{})
+	q := Queue{TopicID: 1, RoomType: 2}
+
+	join(t, svc, "alice", q)
+	state := join(t, svc, "bob", q)
+	if state.Kind != StateMatched {
+		t.Fatalf("state = %+v, want matched", state)
+	}
+
+	// A participant whose session cannot be read joins without identifiers.
+	want := []Participant{
+		{Token: "alice", Identity: Identity{IPHash: "ip-hash-alice", Device: "device-alice"}},
+		{Token: "bob"},
+	}
+	if got := repo.participants[state.Conversation.ID]; !slices.Equal(got, want) {
+		t.Fatalf("participants = %+v, want %+v", got, want)
 	}
 }
