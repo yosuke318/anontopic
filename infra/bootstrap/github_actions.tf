@@ -6,11 +6,12 @@ data "aws_iam_openid_connect_provider" "github" {
 
 # plan 用。pull request と main への push から引き受けられる。
 #
-# リポジトリの照合は sub ではなく repository クレームで行う。GitHub は組織やリポジトリの
-# 名前が変わったことを検知すると、sub を "repo:owner@<owner_id>/repo@<repo_id>:..." という
-# ID 付きの形式に変える。repository クレームは常に "owner/repo" のままなので、
-# この揺れの影響を受けない。pull request と main への push は event_name と ref の
-# クレームで区別する。
+# リポジトリの絞り込みは repository / event_name / ref クレームで行う。GitHub は組織や
+# リポジトリの名前が変わったことを検知すると、sub を "repo:owner@<owner_id>/repo@<repo_id>:..."
+# という ID 付きの形式に変えるが、repository クレームは常に "owner/repo" のままなので、
+# この揺れの影響を受けない。sub の条件は、AWS が GitHub の OIDC プロバイダに対して
+# 要求する「sub か job_workflow_ref による絞り込み」を満たすためだけに、ID の有無どちらにも
+# 一致するワイルドカードで残す。
 data "aws_iam_policy_document" "terraform_plan_trust" {
   statement {
     sid     = "PullRequest"
@@ -25,6 +26,12 @@ data "aws_iam_policy_document" "terraform_plan_trust" {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:aud"
       values   = ["sts.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringLike"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = [local.github_sub_pattern]
     }
 
     condition {
@@ -53,6 +60,12 @@ data "aws_iam_policy_document" "terraform_plan_trust" {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:aud"
       values   = ["sts.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringLike"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = [local.github_sub_pattern]
     }
 
     condition {
@@ -102,7 +115,8 @@ resource "aws_iam_role_policy" "terraform_plan_state_lock" {
 
 # apply 用。GitHub の Environment（dev / prod）を指定したジョブからだけ引き受けられる。
 # どのブランチから、誰の承認で apply できるかは Environment の保護ルールで絞る。
-# plan 用と同じ理由で、リポジトリの照合は sub ではなく repository クレームで行う。
+# plan 用と同じ理由で、リポジトリの絞り込みは repository クレームで行い、sub は
+# AWS が要求する絞り込み条件を満たすためだけにワイルドカードで残す。
 data "aws_iam_policy_document" "terraform_apply_trust" {
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]
@@ -116,6 +130,12 @@ data "aws_iam_policy_document" "terraform_apply_trust" {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:aud"
       values   = ["sts.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringLike"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = [local.github_sub_pattern]
     }
 
     condition {
