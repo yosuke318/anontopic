@@ -93,11 +93,14 @@ func run() error {
 		CacheTTL: envDuration("TOPIC_CACHE_TTL", topic.DefaultCacheTTL),
 	})
 
+	bans := newBans(pool, rdb)
+
 	matches := matching.NewService(
 		matching.NewRedisStore(rdb),
 		matching.NewPostgresRepository(pool),
 		topics,
-		report.NewPostgresBanList(pool),
+		matchingBans{bans},
+		sessionIdentities{sessions},
 		limits,
 		matching.Options{
 			WaitTTL:       envDuration("MATCHING_WAIT_TTL", matching.DefaultWaitTTL),
@@ -204,6 +207,44 @@ func newChatService(pool *pgxpool.Pool, rdb *redis.Client, limits *capacity.Serv
 			RejoinGrace: envDuration("CHAT_REJOIN_GRACE", chat.DefaultRejoinGrace),
 		},
 	)
+}
+
+// newBans builds the ban list the report module keeps, with the thresholds
+// that move an identifier up the stages of sanction.
+func newBans(pool *pgxpool.Pool, rdb *redis.Client) *report.Bans {
+	return report.NewBans(report.NewPostgresBanRepository(pool), report.NewRedisSanctionStore(rdb), report.BanOptions{
+		CacheTTL:          envDuration("SANCTION_BAN_CACHE_TTL", report.DefaultBanCacheTTL),
+		BlockedThreshold:  envInt("SANCTION_BLOCKED_THRESHOLD", report.DefaultBlockedThreshold),
+		BlockedWindow:     envDuration("SANCTION_BLOCKED_WINDOW", report.DefaultBlockedWindow),
+		ReportedThreshold: envInt("SANCTION_REPORTED_THRESHOLD", report.DefaultReportedThreshold),
+		ReportedWindow:    envDuration("SANCTION_REPORTED_WINDOW", report.DefaultReportedWindow),
+		Suspension:        envDuration("SANCTION_SUSPENSION", report.DefaultSuspension),
+		WarningTTL:        envDuration("SANCTION_WARNING_TTL", report.DefaultWarningTTL),
+	})
+}
+
+// matchingBans carries the ban check of the matching module to the ban list
+// the report module keeps.
+type matchingBans struct {
+	bans *report.Bans
+}
+
+func (b matchingBans) IsBanned(ctx context.Context, id matching.Identity) (bool, error) {
+	return b.bans.IsBanned(ctx, report.Identity(id))
+}
+
+// sessionIdentities reads the identifiers of a waiting user out of the
+// session module, for the matching module to record with the room.
+type sessionIdentities struct {
+	sessions *session.Service
+}
+
+func (s sessionIdentities) Identity(ctx context.Context, token string) (matching.Identity, error) {
+	sess, err := s.sessions.Lookup(ctx, token)
+	if err != nil {
+		return matching.Identity{}, err
+	}
+	return matching.Identity{IPHash: sess.IPHash, Device: sess.Device}, nil
 }
 
 // newModerationService builds the filter every message passes before its room
