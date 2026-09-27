@@ -13,6 +13,11 @@ type Repository interface {
 	// ErrConversationNotFound when there is no such conversation.
 	Conversation(ctx context.Context, id string) (Conversation, error)
 
+	// Participants returns every participant of the conversation id names
+	// with the identifiers recorded for them, in the order Conversation
+	// lists their tokens. A conversation that does not exist has none.
+	Participants(ctx context.Context, id string) ([]Participant, error)
+
 	// AddMessages records messages of conversations, in the order they are
 	// given. The slice is only the caller's for the length of the call, so an
 	// implementation that keeps the messages has to copy them.

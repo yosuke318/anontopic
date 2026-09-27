@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -20,6 +21,12 @@ type conn struct {
 	conversationID string
 	token          string
 	participant    int
+	identity       Identity
+
+	// banned is set once the participant is told they were banned. The
+	// connection closes after that event is written, and nothing it sends in
+	// the meantime is taken.
+	banned atomic.Bool
 
 	out       chan outgoing
 	done      chan struct{}
@@ -42,6 +49,7 @@ func newConn(svc *Service, ws *websocket.Conn, adm Admission) *conn {
 		conversationID: adm.Conversation.ID,
 		token:          adm.Token,
 		participant:    adm.Participant,
+		identity:       adm.Identity,
 		out:            make(chan outgoing, sendBuffer),
 		done:           make(chan struct{}),
 	}

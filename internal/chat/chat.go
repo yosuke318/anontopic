@@ -21,6 +21,10 @@
 // to the room. The reasoning is in
 // docs/adr/0012-buffer-message-writes-into-batched-inserts.md.
 //
+// A client under a ban is refused at the handshake. Every message the filter
+// blocks is counted through Sanctions, and the sanction it leads to is carried
+// out on the connection: a warning is shown, and a ban ends the connection.
+//
 // Boundary: other modules must never import chat's persistence models.
 // Cross-module communication goes through the exported interfaces below.
 package chat
@@ -29,6 +33,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"slices"
@@ -102,6 +107,10 @@ const (
 	endReasonUserLeft = "user_left"
 	// endReasonReported ends a conversation a participant reported.
 	endReasonReported = "reported"
+	// endReasonBanned ends the conversation for a participant who was banned
+	// while in it. The others see the participant leave, and it is never
+	// recorded as the end of the conversation.
+	endReasonBanned = "banned"
 )
 
 var (
@@ -115,6 +124,10 @@ var (
 
 	// ErrConversationEnded is returned for a conversation that is over.
 	ErrConversationEnded = errors.New("chat: conversation has ended")
+
+	// ErrBanned is returned when an identifier of the caller is on the ban
+	// list.
+	ErrBanned = errors.New("chat: banned identifier")
 )
 
 // Decision is what a Moderator says about the body of one message.
@@ -139,11 +152,44 @@ type Verdict struct {
 }
 
 // SessionAuthenticator resolves the session a request carries and returns the
-// token identifying the participant, plus the hashed address the session was
-// issued to.
+// token identifying the participant, plus the hashed address and the device
+// ID the request came with.
 type SessionAuthenticator interface {
 	Authenticate(r *http.Request) (string, error)
 	IPHash(r *http.Request) string
+	DeviceID(r *http.Request) string
+}
+
+// Identity is what one participant is told apart by for the ban list. Either
+// field is empty when it is not known.
+type Identity struct {
+	IPHash string
+	Device string
+}
+
+// Sanction is what counting an offence against a participant led to.
+type Sanction int
+
+const (
+	// SanctionNone leaves the participant as they are.
+	SanctionNone Sanction = iota
+	// SanctionWarning shows the participant a warning.
+	SanctionWarning
+	// SanctionBan bars the participant, for a while or for good.
+	SanctionBan
+)
+
+// Sanctions is what the chat module asks of the module that keeps the ban
+// list.
+type Sanctions interface {
+	// IsBanned reports whether any identifier of id is barred.
+	IsBanned(ctx context.Context, id Identity) (bool, error)
+	// RecordBlocked counts one message the filter blocked against id, and
+	// returns the sanction that led to.
+	RecordBlocked(ctx context.Context, id Identity) (Sanction, error)
+	// TakeWarning reports whether a warning waits to be shown to id, and
+	// drops it.
+	TakeWarning(ctx context.Context, id Identity) (bool, error)
 }
 
 // ConnectionLimiter counts one connection against the limits the service
@@ -188,6 +234,13 @@ type Conversation struct {
 	Participants []string
 }
 
+// Participant is one participant of a conversation together with the
+// identifiers recorded when the room was formed.
+type Participant struct {
+	Token    string
+	Identity Identity
+}
+
 // Message is one message of a conversation, as it is recorded.
 type Message struct {
 	ConversationID string
@@ -211,6 +264,8 @@ type Admission struct {
 	// one, so that every server names a participant the same way and no
 	// session token reaches the other participants.
 	Participant int
+	// Identity is what the participant connected with.
+	Identity Identity
 }
 
 // Service admits participants to a conversation and carries what they send.
@@ -219,6 +274,7 @@ type Service struct {
 	store     Store
 	moderator Moderator
 	messages  MessageLimiter
+	sanctions Sanctions
 	hub       *hub
 	writer    *messageWriter
 
@@ -247,10 +303,10 @@ type Options struct {
 }
 
 // NewService builds a Service. A nil moderator delivers every message as it
-// was written, and a nil messages limiter takes them however fast they are
-// sent. The messages the service takes are recorded by a writer of its own,
-// which Close stops.
-func NewService(repo Repository, store Store, moderator Moderator, messages MessageLimiter, opts Options) *Service {
+// was written, a nil messages limiter takes them however fast they are sent,
+// and nil sanctions bars nobody. The messages the service takes are recorded
+// by a writer of its own, which Close stops.
+func NewService(repo Repository, store Store, moderator Moderator, messages MessageLimiter, sanctions Sanctions, opts Options) *Service {
 	if opts.PresenceInterval <= 0 {
 		opts.PresenceInterval = DefaultPresenceInterval
 	}
@@ -275,6 +331,7 @@ func NewService(repo Repository, store Store, moderator Moderator, messages Mess
 		store:            store,
 		moderator:        moderator,
 		messages:         messages,
+		sanctions:        sanctions,
 		hub:              newHub(store),
 		writer:           newMessageWriter(repo, opts.WriteBatch, opts.WriteInterval),
 		presenceInterval: opts.PresenceInterval,
@@ -293,8 +350,18 @@ func (s *Service) Close(ctx context.Context) error {
 }
 
 // Admit reports the place token holds in the conversation, and refuses anyone
-// the conversation was not formed for.
-func (s *Service) Admit(ctx context.Context, conversationID, token string) (Admission, error) {
+// the conversation was not formed for and anyone under a ban.
+func (s *Service) Admit(ctx context.Context, conversationID, token string, id Identity) (Admission, error) {
+	if s.sanctions != nil {
+		banned, err := s.sanctions.IsBanned(ctx, id)
+		if err != nil {
+			return Admission{}, fmt.Errorf("read ban list: %w", err)
+		}
+		if banned {
+			return Admission{}, ErrBanned
+		}
+	}
+
 	conv, err := s.repo.Conversation(ctx, conversationID)
 	if err != nil {
 		return Admission{}, err
@@ -308,7 +375,7 @@ func (s *Service) Admit(ctx context.Context, conversationID, token string) (Admi
 		return Admission{}, ErrNotParticipant
 	}
 
-	return Admission{Conversation: conv, Token: token, Participant: at + 1}, nil
+	return Admission{Conversation: conv, Token: token, Participant: at + 1, Identity: id}, nil
 }
 
 // IsParticipant reports whether token belongs to a participant of the
@@ -325,6 +392,13 @@ func (s *Service) IsParticipant(ctx context.Context, conversationID, token strin
 	}
 
 	return slices.Contains(conv.Participants, token), nil
+}
+
+// Participants reads every participant of the conversation with the
+// identifiers recorded for them, in the order the room numbers them from one.
+// An id no conversation carries has no participants.
+func (s *Service) Participants(ctx context.Context, conversationID string) ([]Participant, error) {
+	return s.repo.Participants(ctx, conversationID)
 }
 
 // Serve carries one connection until it closes: it announces the participant
@@ -373,6 +447,10 @@ func (s *Service) Serve(ctx context.Context, ws *websocket.Conn, adm Admission) 
 		Present:     present,
 	})
 
+	// A warning given while the participant was not connected, such as one
+	// for being reported, is shown when they next enter a room.
+	s.showWarning(ctx, c)
+
 	go c.heartbeatLoop(ctx)
 	c.readLoop(ctx)
 }
@@ -419,6 +497,10 @@ func (s *Service) end(ctx context.Context, conversationID, reason string) {
 
 // handleFrame acts on one frame a client sent.
 func (s *Service) handleFrame(ctx context.Context, c *conn, data []byte) {
+	if c.banned.Load() {
+		return
+	}
+
 	var frame clientFrame
 	if err := json.Unmarshal(data, &frame); err != nil {
 		c.send(errorEvent(codeInvalidFrame, "the frame is not a JSON object this room reads"))
@@ -492,6 +574,8 @@ func (s *Service) sendMessage(ctx context.Context, c *conn, body string) {
 		ev := errorEvent(codeBlocked, "the message was not delivered")
 		ev.Reason = verdict.Reason
 		c.send(ev)
+
+		s.sanctionBlocked(ctx, c)
 		return
 	}
 
@@ -511,6 +595,47 @@ func (s *Service) sendMessage(ctx context.Context, c *conn, body string) {
 		Body:        msg.Body,
 		SentAt:      &sentAt,
 	})
+}
+
+// sanctionBlocked counts a blocked message against its sender and carries out
+// the sanction it led to. A count that fails leaves the sender as they are:
+// the message was kept from the room all the same.
+func (s *Service) sanctionBlocked(ctx context.Context, c *conn) {
+	if s.sanctions == nil {
+		return
+	}
+
+	sanction, err := s.sanctions.RecordBlocked(ctx, c.identity)
+	if err != nil {
+		slog.Error("count blocked message towards sanction",
+			slog.String("conversation_id", c.conversationID), slog.Any("error", err))
+		return
+	}
+
+	switch sanction {
+	case SanctionWarning:
+		s.showWarning(ctx, c)
+	case SanctionBan:
+		c.banned.Store(true)
+		c.send(serverEvent{Type: eventEnded, Reason: endReasonBanned})
+	}
+}
+
+// showWarning sends the warning that waits for the participant, if one does.
+func (s *Service) showWarning(ctx context.Context, c *conn) {
+	if s.sanctions == nil {
+		return
+	}
+
+	warned, err := s.sanctions.TakeWarning(ctx, c.identity)
+	if err != nil {
+		slog.Error("read warning",
+			slog.String("conversation_id", c.conversationID), slog.Any("error", err))
+		return
+	}
+	if warned {
+		c.send(serverEvent{Type: eventWarning})
+	}
 }
 
 // allowMessage asks the limiter whether the sender is within their rate.
