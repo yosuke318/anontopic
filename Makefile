@@ -2,6 +2,7 @@
 	build test lint fmt check \
 	backend-build backend-run backend-test backend-lint backend-fmt \
 	frontend-install frontend-build frontend-test frontend-lint frontend-typecheck frontend-format \
+	infra-fmt infra-check infra-plan \
 	load-test load-report
 
 # 開発ツールのバージョン。CI も同じ値を使うため、ここが唯一の定義になる。
@@ -24,6 +25,12 @@ LOAD_RATE ?= 50
 LOAD_DURATION ?= 30s
 LOAD_TARGETS ?= test/load/targets.txt
 LOAD_RESULT ?= test/load/results/latest.bin
+
+# Terraform のルートモジュール。infra-check はこのすべてを validate する。
+TERRAFORM_ROOTS := infra/bootstrap infra/environments/dev infra/environments/prod
+# infra-plan の対象環境。シェルの環境変数 ENV と衝突しないよう専用の名前にしている。
+# make infra-plan INFRA_ENV=prod のように上書きする。
+INFRA_ENV ?= dev
 
 help: ## Show available targets
 	@grep -hE '^[^ 	#]+:.*## ' $(MAKEFILE_LIST) \
@@ -81,9 +88,9 @@ test: backend-test frontend-test ## Run the backend and frontend tests
 
 lint: backend-lint frontend-lint frontend-typecheck ## Lint and type-check the backend and the frontend
 
-fmt: backend-fmt frontend-format ## Format the backend and the frontend
+fmt: backend-fmt frontend-format infra-fmt ## Format the backend, the frontend and the Terraform code
 
-check: lint test build ## Run every check required before pushing
+check: lint test build infra-check ## Run every check required before pushing
 
 # --- バックエンド（Go） ---------------------------------------------------
 
@@ -121,6 +128,25 @@ frontend-typecheck: ## Type-check the Next.js app
 
 frontend-format: ## Format the Next.js app with Prettier
 	cd web && npm run format
+
+# --- インフラ（Terraform） -----------------------------------------------
+
+infra-fmt: ## Format the Terraform code
+	terraform fmt -recursive infra
+
+# backend に接続せずに検査するため、AWS の認証情報が無くても通る。
+# lock ファイルと食い違うプロバイダは入れない。
+infra-check: ## Check the Terraform formatting and validate every root module
+	terraform fmt -check -recursive infra
+	@for dir in $(TERRAFORM_ROOTS); do \
+		echo "terraform validate: $$dir"; \
+		terraform -chdir=$$dir init -backend=false -input=false -lockfile=readonly >/dev/null || exit 1; \
+		terraform -chdir=$$dir validate -no-color || exit 1; \
+	done
+
+infra-plan: ## Run terraform plan for INFRA_ENV (dev / prod) against the remote state
+	terraform -chdir=infra/environments/$(INFRA_ENV) init -input=false -lockfile=readonly -backend-config=backend.tfbackend
+	terraform -chdir=infra/environments/$(INFRA_ENV) plan -input=false
 
 # --- 負荷テスト -----------------------------------------------------------
 

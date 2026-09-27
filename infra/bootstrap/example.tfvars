@@ -1,0 +1,2 @@
+aws_account_id    = "123456789012"
+state_bucket_name = "anontopic-tfstate-123456789012"
