@@ -25,6 +25,10 @@ const (
 
 	// maxStatusBytes caps a status change.
 	maxStatusBytes = 1 << 8
+
+	// maxBanBytes caps a ban an operator imposes. Its reason fits even when
+	// every rune takes four bytes.
+	maxBanBytes = 2 << 10
 )
 
 // SessionAuthenticator resolves the session a request carries and returns the
@@ -68,6 +72,14 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("PATCH /api/admin/reports/{id}", h.admin.Require(http.HandlerFunc(h.handleUpdate)))
 	mux.Handle("GET /api/admin/claims", h.admin.Require(http.HandlerFunc(h.handleListClaims)))
 	mux.Handle("PATCH /api/admin/claims/{id}", h.admin.Require(http.HandlerFunc(h.handleUpdateClaim)))
+
+	if !h.svc.ServesBans() {
+		return
+	}
+
+	mux.Handle("GET /api/admin/bans", h.admin.Require(http.HandlerFunc(h.handleListBans)))
+	mux.Handle("POST /api/admin/bans", h.admin.Require(http.HandlerFunc(h.handleBan)))
+	mux.Handle("DELETE /api/admin/bans/{id}", h.admin.Require(http.HandlerFunc(h.handleLift)))
 }
 
 // submitRequest is the conversation the caller reports and why.
@@ -143,6 +155,36 @@ type claimResponse struct {
 
 type claimListResponse struct {
 	Claims []claimResponse `json:"claims"`
+}
+
+// banRequest is a sanction an operator imposes on one participant of a
+// conversation, named by their number in the room.
+type banRequest struct {
+	ConversationID string `json:"conversation_id"`
+	Participant    int    `json:"participant"`
+	IdentifierType string `json:"identifier_type"`
+	Sanction       string `json:"sanction"`
+	// DurationHours is how long a suspension lasts.
+	DurationHours int    `json:"duration_hours"`
+	Reason        string `json:"reason"`
+}
+
+// banResponse is one sanction as an operator sees it. The identifier itself
+// is left out: it is a hash that tells an operator nothing.
+type banResponse struct {
+	ID             int64      `json:"id"`
+	IdentifierType string     `json:"identifier_type"`
+	Sanction       string     `json:"sanction"`
+	Source         string     `json:"source"`
+	Reason         string     `json:"reason"`
+	ConversationID *string    `json:"conversation_id"`
+	BannedUntil    *time.Time `json:"banned_until"`
+	CreatedAt      time.Time  `json:"created_at"`
+	LiftedAt       *time.Time `json:"lifted_at"`
+}
+
+type banListResponse struct {
+	Bans []banResponse `json:"bans"`
 }
 
 // handleSubmit takes one report from a participant of the conversation it
@@ -352,6 +394,101 @@ func (h *Handler) handleUpdateClaim(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toClaimResponse(c))
 }
 
+// handleListBans answers with the sanctions the query keeps: every one, or
+// with active=true the bans in force.
+func (h *Handler) handleListBans(w http.ResponseWriter, r *http.Request) {
+	f, ok := readFilter(w, r)
+	if !ok {
+		return
+	}
+	if f.Status != "" {
+		http.Error(w, "unknown query parameter status", http.StatusBadRequest)
+		return
+	}
+
+	bf := BanFilter{BeforeID: f.BeforeID, Limit: f.Limit}
+	if v := r.URL.Query().Get("active"); v != "" {
+		active, err := strconv.ParseBool(v)
+		if err != nil {
+			http.Error(w, "invalid active", http.StatusBadRequest)
+			return
+		}
+		bf.Active = active
+	}
+
+	bans, err := h.svc.ListBans(r.Context(), bf)
+	if err != nil {
+		writeError(w, "list bans", err)
+		return
+	}
+
+	body := banListResponse{Bans: make([]banResponse, 0, len(bans))}
+	for _, b := range bans {
+		body.Bans = append(body.Bans, toBanResponse(b))
+	}
+	writeJSON(w, http.StatusOK, body)
+}
+
+// handleBan imposes a sanction on one participant of a conversation.
+func (h *Handler) handleBan(w http.ResponseWriter, r *http.Request) {
+	var req banRequest
+	if !decodeJSON(w, r, &req, maxBanBytes) {
+		return
+	}
+	if !isUUID(req.ConversationID) {
+		http.Error(w, "invalid conversation_id", http.StatusBadRequest)
+		return
+	}
+
+	ban, err := h.svc.BanParticipant(r.Context(), req.ConversationID, req.Participant, Imposition{
+		IdentifierType: req.IdentifierType,
+		Sanction:       req.Sanction,
+		Duration:       time.Duration(req.DurationHours) * time.Hour,
+		Reason:         req.Reason,
+	})
+	if err != nil {
+		writeError(w, "impose ban", err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, toBanResponse(ban))
+}
+
+// handleLift lifts one sanction.
+func (h *Handler) handleLift(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+
+	ban, err := h.svc.LiftBan(r.Context(), id)
+	if err != nil {
+		writeError(w, "lift ban", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toBanResponse(ban))
+}
+
+func toBanResponse(b Ban) banResponse {
+	body := banResponse{
+		ID:             b.ID,
+		IdentifierType: b.IdentifierType,
+		Sanction:       b.Sanction,
+		Source:         b.Source,
+		Reason:         b.Reason,
+		CreatedAt:      b.CreatedAt,
+	}
+	if b.ConversationID != "" {
+		body.ConversationID = &b.ConversationID
+	}
+	if !b.BannedUntil.IsZero() {
+		body.BannedUntil = &b.BannedUntil
+	}
+	if !b.LiftedAt.IsZero() {
+		body.LiftedAt = &b.LiftedAt
+	}
+	return body
+}
+
 func toReportResponse(rep Report) reportResponse {
 	return reportResponse{
 		ID:             rep.ID,
@@ -429,6 +566,20 @@ func writeError(w http.ResponseWriter, op string, err error) {
 	switch {
 	case errors.Is(err, ErrUnknownStatus):
 		http.Error(w, "unknown status", http.StatusBadRequest)
+	case errors.Is(err, ErrUnknownIdentifierType):
+		http.Error(w, "unknown identifier_type", http.StatusBadRequest)
+	case errors.Is(err, ErrUnknownSanction):
+		http.Error(w, "unknown sanction", http.StatusBadRequest)
+	case errors.Is(err, ErrInvalidSuspension):
+		http.Error(w, "duration_hours is required for a suspension, up to a year, and only for one", http.StatusBadRequest)
+	case errors.Is(err, ErrReasonTooLong):
+		http.Error(w, "reason is too long", http.StatusBadRequest)
+	case errors.Is(err, ErrUnknownParticipant):
+		http.Error(w, "unknown participant", http.StatusBadRequest)
+	case errors.Is(err, ErrNoIdentifier):
+		http.Error(w, "no identifier of that type is recorded for the participant", http.StatusConflict)
+	case errors.Is(err, ErrAlreadyLifted):
+		http.Error(w, "already lifted", http.StatusConflict)
 	case errors.Is(err, ErrNotFound):
 		http.Error(w, "not found", http.StatusNotFound)
 	default:

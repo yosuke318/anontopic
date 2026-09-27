@@ -119,7 +119,7 @@ func run() error {
 
 	// Only a participant of a conversation may report it, and the chat module
 	// is what knows who those are and holds what was said.
-	reports := report.NewService(report.NewPostgresRepository(pool), reportedConversations{chats})
+	reports := report.NewService(report.NewPostgresRepository(pool), reportedConversations{chats}, bans)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", handleHealth)
@@ -331,6 +331,19 @@ func (c reportedConversations) Flag(ctx context.Context, conversationID, reporte
 
 func (c reportedConversations) EndReported(ctx context.Context, conversationID string) error {
 	return c.chats.EndReported(ctx, conversationID)
+}
+
+func (c reportedConversations) Participants(ctx context.Context, conversationID string) ([]report.Participant, error) {
+	participants, err := c.chats.Participants(ctx, conversationID)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]report.Participant, 0, len(participants))
+	for _, p := range participants {
+		out = append(out, report.Participant{Token: p.Token, Identity: report.Identity(p.Identity)})
+	}
+	return out, nil
 }
 
 func (c reportedConversations) Transcript(ctx context.Context, conversationID string) (report.Transcript, error) {
