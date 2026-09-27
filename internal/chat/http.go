@@ -79,7 +79,8 @@ func (h *Handler) handleRoomSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	adm, err := h.svc.Admit(r.Context(), r.PathValue("roomID"), token)
+	id := Identity{IPHash: h.sessions.IPHash(r), Device: h.sessions.DeviceID(r)}
+	adm, err := h.svc.Admit(r.Context(), r.PathValue("roomID"), token, id)
 	if err != nil {
 		writeAdmissionError(w, err)
 		return
@@ -133,7 +134,7 @@ func writeCapacityError(w http.ResponseWriter, err error) {
 // exist, so that a caller cannot learn which conversations are being held.
 func writeAdmissionError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, ErrConversationNotFound), errors.Is(err, ErrNotParticipant):
+	case errors.Is(err, ErrConversationNotFound), errors.Is(err, ErrNotParticipant), errors.Is(err, ErrBanned):
 		http.Error(w, "forbidden", http.StatusForbidden)
 	case errors.Is(err, ErrConversationEnded):
 		http.Error(w, "the conversation has ended", http.StatusGone)

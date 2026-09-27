@@ -6,6 +6,12 @@
 // Store behind a TTL, so revoking a session is a delete. The token value is
 // what other modules persist as session_token.
 //
+// The module also hands each browser a device ID in a cookie of its own that
+// outlives its sessions. It is what banned_identifiers calls
+// device_fingerprint, and lets a sanction reach one browser without reaching
+// everyone behind the same address; the reasoning is in
+// docs/adr/0025-escalate-sanctions-on-the-device-id-and-leave-address-bans-to-operators.md.
+//
 // Boundary: other modules receive the token string through an interface they
 // own and never read this module's storage.
 package session
@@ -36,6 +42,10 @@ const (
 	// DefaultAbsoluteTTL is the age at which a session expires even if it is
 	// used continuously.
 	DefaultAbsoluteTTL = 7 * 24 * time.Hour
+
+	// DeviceTTL is how long a browser keeps its device ID without asking for
+	// a session.
+	DeviceTTL = 365 * 24 * time.Hour
 )
 
 // ErrInvalidSession is returned when a token is unknown, expired or revoked.
@@ -47,7 +57,10 @@ type Session struct {
 	Token string
 	// IPHash identifies the network the session was issued to without keeping
 	// the address itself.
-	IPHash   string
+	IPHash string
+	// Device is the device ID the session was issued to, or empty for a
+	// session issued before the client held one.
+	Device   string
 	IssuedAt time.Time
 	// ExpiresAt is when the session dies if it is not used again.
 	ExpiresAt time.Time
@@ -110,15 +123,23 @@ func NewService(store Store, ipHashKey []byte, opts Options) *Service {
 	}
 }
 
-// Issue creates a session for the client behind r.
+// Issue creates a session for the client behind r. A client that holds no
+// device ID is given a new one with the session.
 func (s *Service) Issue(ctx context.Context, r *http.Request) (Session, error) {
 	token, err := newToken()
 	if err != nil {
 		return Session{}, err
 	}
 
+	device := s.DeviceID(r)
+	if device == "" {
+		if device, err = newToken(); err != nil {
+			return Session{}, err
+		}
+	}
+
 	issuedAt := s.now().UTC()
-	rec := Record{IPHash: s.IPHash(r), IssuedAt: issuedAt}
+	rec := Record{IPHash: s.IPHash(r), Device: device, IssuedAt: issuedAt}
 	ttl := min(s.idleTTL, s.absoluteTTL)
 
 	if err := s.store.Create(ctx, token, rec, ttl); err != nil {
@@ -128,6 +149,7 @@ func (s *Service) Issue(ctx context.Context, r *http.Request) (Session, error) {
 	return Session{
 		Token:     token,
 		IPHash:    rec.IPHash,
+		Device:    rec.Device,
 		IssuedAt:  issuedAt,
 		ExpiresAt: issuedAt.Add(ttl),
 	}, nil
@@ -168,9 +190,29 @@ func (s *Service) Verify(ctx context.Context, token string) (Session, error) {
 	return Session{
 		Token:     token,
 		IPHash:    rec.IPHash,
+		Device:    rec.Device,
 		IssuedAt:  rec.IssuedAt,
 		ExpiresAt: now.Add(ttl),
 	}, nil
+}
+
+// Lookup reads what token stands for without extending its idle window. It
+// is how another module reads the identifiers of a participant whose request
+// it is not serving.
+func (s *Service) Lookup(ctx context.Context, token string) (Session, error) {
+	if !wellFormed(token) {
+		return Session{}, ErrInvalidSession
+	}
+
+	rec, err := s.store.Get(ctx, token)
+	if errors.Is(err, ErrNotStored) {
+		return Session{}, ErrInvalidSession
+	}
+	if err != nil {
+		return Session{}, fmt.Errorf("read session: %w", err)
+	}
+
+	return Session{Token: token, IPHash: rec.IPHash, Device: rec.Device, IssuedAt: rec.IssuedAt}, nil
 }
 
 // Authenticate resolves the session carried by r and returns its token. It is
@@ -217,6 +259,16 @@ func (s *Service) IPHash(r *http.Request) string {
 	mac := hmac.New(sha256.New, s.ipHashKey)
 	mac.Write([]byte(s.clientIP(r)))
 	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// DeviceID is the device ID the request carries, or empty when it carries
+// none this package could have issued.
+func (s *Service) DeviceID(r *http.Request) string {
+	c, err := r.Cookie(deviceCookieName)
+	if err != nil || !wellFormed(c.Value) {
+		return ""
+	}
+	return c.Value
 }
 
 // clientIP is the address the session belongs to.

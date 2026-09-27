@@ -14,6 +14,10 @@ import (
 // their own.
 const cookieName = "anontopic_session"
 
+// deviceCookieName carries the device ID. It is HttpOnly for the same reason
+// as the session cookie, and outlives the session it came with.
+const deviceCookieName = "anontopic_device"
+
 // contextKey scopes the token stored on a request context to this package.
 type contextKey struct{}
 
@@ -46,6 +50,11 @@ func (h *Handler) handleIssue(w http.ResponseWriter, r *http.Request) {
 		sess, err := h.svc.Verify(r.Context(), token)
 		switch {
 		case err == nil:
+			if err := h.svc.writeDeviceCookie(w, r, sess); err != nil {
+				slog.Error("issue device id", slog.Any("error", err))
+				http.Error(w, "internal server error", http.StatusInternalServerError)
+				return
+			}
 			h.svc.writeCookie(w, sess)
 			writeJSON(w, http.StatusOK, sessionResponse{ExpiresAt: sess.ExpiresAt})
 			return
@@ -63,6 +72,11 @@ func (h *Handler) handleIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := h.svc.writeDeviceCookie(w, r, sess); err != nil {
+		slog.Error("issue device id", slog.Any("error", err))
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
 	h.svc.writeCookie(w, sess)
 	writeJSON(w, http.StatusCreated, sessionResponse{ExpiresAt: sess.ExpiresAt})
 }
@@ -132,6 +146,33 @@ func (s *Service) writeCookie(w http.ResponseWriter, sess Session) {
 		Secure:   s.cookieSecure,
 		SameSite: s.cookieSameSite,
 	})
+}
+
+// writeDeviceCookie makes the client keep its device ID for another
+// DeviceTTL. The ID is the one the request carries, then the one sess was
+// issued to, and a new one for a client that has neither.
+func (s *Service) writeDeviceCookie(w http.ResponseWriter, r *http.Request, sess Session) error {
+	device := s.DeviceID(r)
+	if device == "" {
+		device = sess.Device
+	}
+	if device == "" {
+		var err error
+		if device, err = newToken(); err != nil {
+			return err
+		}
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     deviceCookieName,
+		Value:    device,
+		Path:     "/",
+		MaxAge:   int(DeviceTTL.Seconds()),
+		HttpOnly: true,
+		Secure:   s.cookieSecure,
+		SameSite: s.cookieSameSite,
+	})
+	return nil
 }
 
 // clearCookie drops the cookie from the client.

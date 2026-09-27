@@ -153,6 +153,18 @@ func (f *fakeConversations) EndReported(_ context.Context, conversationID string
 	return nil
 }
 
+// Participants names the identifiers of every member after their token.
+func (f *fakeConversations) Participants(_ context.Context, conversationID string) ([]Participant, error) {
+	participants := make([]Participant, 0, len(f.members[conversationID]))
+	for _, token := range f.members[conversationID] {
+		participants = append(participants, Participant{
+			Token:    token,
+			Identity: Identity{IPHash: "ip-hash-" + token, Device: "device-" + token},
+		})
+	}
+	return participants, nil
+}
+
 func (f *fakeConversations) Transcript(_ context.Context, conversationID string) (Transcript, error) {
 	return Transcript{
 		ConversationID: conversationID,
@@ -201,18 +213,22 @@ type testEnv struct {
 	svc   *Service
 	repo  *fakeRepository
 	convs *fakeConversations
+	bans  *fakeBanRepository
+	store *fakeSanctionStore
+	clock *testClock
 	mux   *http.ServeMux
 }
 
 func newTestEnv(members map[string][]string) *testEnv {
 	repo := &fakeRepository{}
 	convs := &fakeConversations{members: members}
-	svc := NewService(repo, convs)
+	bans, banRepo, store, clock := newTestBans()
+	svc := NewService(repo, convs, bans)
 
 	mux := http.NewServeMux()
 	NewHandler(svc, &fakeSessions{token: testToken}, &fakeClaimLimiter{left: 2}, testAdminToken).Register(mux)
 
-	return &testEnv{svc: svc, repo: repo, convs: convs, mux: mux}
+	return &testEnv{svc: svc, repo: repo, convs: convs, bans: banRepo, store: store, clock: clock, mux: mux}
 }
 
 // do sends a report request carrying a session.
@@ -570,7 +586,7 @@ func TestEndpointAnswersARequestWithoutASessionWithUnauthorized(t *testing.T) {
 
 func TestAdminEndpointsAreNotServedWithoutAToken(t *testing.T) {
 	mux := http.NewServeMux()
-	svc := NewService(&fakeRepository{}, &fakeConversations{})
+	svc := NewService(&fakeRepository{}, &fakeConversations{}, nil)
 	NewHandler(svc, &fakeSessions{}, &fakeClaimLimiter{}, "").Register(mux)
 
 	r := httptest.NewRequest(http.MethodGet, "/api/admin/reports", nil)

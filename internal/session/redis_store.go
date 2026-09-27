@@ -15,6 +15,7 @@ const (
 	ipIndexKeyPrefix = "session_ip:"
 
 	fieldIPHash   = "ip_hash"
+	fieldDevice   = "device"
 	fieldIssuedAt = "issued_at"
 )
 
@@ -35,6 +36,7 @@ func (s *RedisStore) Create(ctx context.Context, token string, rec Record, ttl t
 	pipe := s.client.TxPipeline()
 	pipe.HSet(ctx, sessionKey,
 		fieldIPHash, rec.IPHash,
+		fieldDevice, rec.Device,
 		fieldIssuedAt, strconv.FormatInt(rec.IssuedAt.UnixNano(), 10),
 	)
 	pipe.Expire(ctx, sessionKey, ttl)
@@ -75,6 +77,7 @@ func (s *RedisStore) Get(ctx context.Context, token string) (Record, error) {
 
 	return Record{
 		IPHash:   fields[fieldIPHash],
+		Device:   fields[fieldDevice],
 		IssuedAt: time.Unix(0, nanos).UTC(),
 	}, nil
 }

@@ -159,3 +159,64 @@ func TestRequireSessionGuardsTheWrappedHandler(t *testing.T) {
 		t.Fatalf("token in context = %q, want %q", seen, issued.Value)
 	}
 }
+
+// deviceCookie returns the device cookie a response sets.
+func deviceCookie(t *testing.T, res *http.Response) *http.Cookie {
+	t.Helper()
+
+	for _, c := range res.Cookies() {
+		if c.Name == deviceCookieName {
+			return c
+		}
+	}
+	t.Fatalf("response sets no %s cookie", deviceCookieName)
+	return nil
+}
+
+func TestIssueEndpointHandsOutADeviceIDThatOutlivesTheSession(t *testing.T) {
+	h, svc := newTestHandler(t)
+
+	first := httptest.NewRecorder()
+	h.handleIssue(first, httptest.NewRequest(http.MethodPost, "/api/session", nil))
+	firstRes := first.Result()
+	defer firstRes.Body.Close()
+
+	device := deviceCookie(t, firstRes)
+	if !device.HttpOnly || device.MaxAge != int(DeviceTTL.Seconds()) {
+		t.Fatalf("device cookie HttpOnly=%v MaxAge=%d, want HttpOnly and %v", device.HttpOnly, device.MaxAge, DeviceTTL)
+	}
+
+	sess, err := svc.Lookup(context.Background(), sessionCookie(t, firstRes).Value)
+	if err != nil {
+		t.Fatalf("Lookup: %v", err)
+	}
+	if sess.Device != device.Value {
+		t.Fatalf("session device = %q, want the one in the cookie %q", sess.Device, device.Value)
+	}
+
+	// A new session for the same browser keeps its device ID.
+	second := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/session", nil)
+	r.AddCookie(device)
+	h.handleIssue(second, r)
+	secondRes := second.Result()
+	defer secondRes.Body.Close()
+
+	if got := deviceCookie(t, secondRes).Value; got != device.Value {
+		t.Fatalf("device ID = %q, want %q kept", got, device.Value)
+	}
+	if svc.DeviceID(r) != device.Value {
+		t.Fatalf("DeviceID = %q, want %q", svc.DeviceID(r), device.Value)
+	}
+}
+
+func TestDeviceIDIgnoresAValueThisPackageCannotHaveIssued(t *testing.T) {
+	svc, _ := newTestService(t)
+
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.AddCookie(&http.Cookie{Name: deviceCookieName, Value: "chosen-by-the-client"})
+
+	if got := svc.DeviceID(r); got != "" {
+		t.Fatalf("DeviceID = %q, want none", got)
+	}
+}

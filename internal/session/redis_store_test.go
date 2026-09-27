@@ -46,7 +46,7 @@ func storeTestSession(t *testing.T, store *RedisStore, ipHash string, ttl time.D
 	if err != nil {
 		t.Fatalf("newToken: %v", err)
 	}
-	rec := Record{IPHash: ipHash, IssuedAt: time.Now().UTC().Truncate(time.Millisecond)}
+	rec := Record{IPHash: ipHash, Device: "device-" + ipHash, IssuedAt: time.Now().UTC().Truncate(time.Millisecond)}
 
 	if err := store.Create(context.Background(), token, rec, ttl); err != nil {
 		t.Fatalf("Create: %v", err)
@@ -80,6 +80,9 @@ func TestRedisStoreKeepsARecordUnderItsTTL(t *testing.T) {
 	}
 	if rec.IPHash != ipHash {
 		t.Fatalf("IPHash = %q, want %q", rec.IPHash, ipHash)
+	}
+	if rec.Device != "device-"+ipHash {
+		t.Fatalf("Device = %q, want %q", rec.Device, "device-"+ipHash)
 	}
 	if rec.IssuedAt.IsZero() {
 		t.Fatal("IssuedAt came back zero")

@@ -68,6 +68,32 @@ func (r *PostgresRepository) Conversation(ctx context.Context, id string) (Conve
 	return conv, nil
 }
 
+// Participants reads the participants of one conversation with their
+// identifiers, in the order Conversation reads their tokens.
+func (r *PostgresRepository) Participants(ctx context.Context, id string) ([]Participant, error) {
+	var parsed pgtype.UUID
+	if err := parsed.Scan(id); err != nil {
+		return nil, nil
+	}
+
+	rows, err := r.pool.Query(ctx,
+		"SELECT session_token, coalesce(ip_hash, ''), coalesce(device_fingerprint, '') "+
+			"FROM conversation_participants WHERE conversation_id = $1 ORDER BY joined_at, id", id)
+	if err != nil {
+		return nil, fmt.Errorf("select conversation participants: %w", err)
+	}
+
+	participants, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Participant, error) {
+		var p Participant
+		err := row.Scan(&p.Token, &p.Identity.IPHash, &p.Identity.Device)
+		return p, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("read conversation participants: %w", err)
+	}
+	return participants, nil
+}
+
 // AddMessages records messages in one round trip. Each row carries the time
 // its message was taken, which is what decides the partition it goes to.
 func (r *PostgresRepository) AddMessages(ctx context.Context, messages []Message) error {

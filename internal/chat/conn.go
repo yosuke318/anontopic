@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -20,6 +21,12 @@ type conn struct {
 	conversationID string
 	token          string
 	participant    int
+	identity       Identity
+
+	// banned is set once the participant is told they were banned. The
+	// connection closes after that event is written, and nothing it sends in
+	// the meantime is taken.
+	banned atomic.Bool
 
 	out       chan outgoing
 	done      chan struct{}
@@ -42,6 +49,7 @@ func newConn(svc *Service, ws *websocket.Conn, adm Admission) *conn {
 		conversationID: adm.Conversation.ID,
 		token:          adm.Token,
 		participant:    adm.Participant,
+		identity:       adm.Identity,
 		out:            make(chan outgoing, sendBuffer),
 		done:           make(chan struct{}),
 	}
@@ -137,7 +145,8 @@ func (c *conn) writeLoop() {
 
 // heartbeatLoop keeps this participant counted as connected, and ends the
 // conversation once it has had nobody to talk to for longer than the rejoin
-// grace.
+// grace. It also looks for a ban on the participant, so that one who only
+// reads is cut off as well.
 func (c *conn) heartbeatLoop(ctx context.Context) {
 	ticker := time.NewTicker(c.svc.presenceInterval)
 	defer ticker.Stop()
@@ -146,6 +155,10 @@ func (c *conn) heartbeatLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ticker.C:
+			if c.svc.cutOffIfBanned(ctx, c) {
+				return
+			}
+
 			now := c.svc.now().UTC()
 
 			connected, err := c.svc.store.Heartbeat(ctx, c.conversationID, c.token, now, c.svc.presenceTTL)

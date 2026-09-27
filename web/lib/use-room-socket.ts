@@ -32,8 +32,9 @@ export type RoomStatus = "connecting" | "open" | "reconnecting" | "ended" | "una
 // こなかったもので、それ以外はサーバーが返したerrorのcode。
 export type OutgoingFailure = RoomErrorCode | "timeout";
 
-// NoticeKindは部屋の出来事のうち、発言でも入退室でもないもの。
-export type NoticeKind = "reconnected" | RoomErrorCode;
+// NoticeKindは部屋の出来事のうち、発言でも入退室でもないもの。warningは運営からの
+// 警告で、本人の画面にだけ届く。
+export type NoticeKind = "reconnected" | "warning" | RoomErrorCode;
 
 type Identified = { id: string };
 
@@ -166,6 +167,8 @@ function applyEvent(state: RoomState, event: RoomEvent): RoomState {
       });
     case "ended":
       return { ...state, status: "ended", endReason: event.reason, present: [] };
+    case "warning":
+      return append(state, { kind: "notice", notice: "warning" });
     case "error":
       return failSending(state, event.code, event.reason);
   }

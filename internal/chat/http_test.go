@@ -24,7 +24,7 @@ func testHandler(t *testing.T, allowedOrigins []string) (*Handler, *fakeReposito
 
 	repo := newFakeRepository(tokenAlice, tokenBob)
 	sessions := &stubAuthenticator{tokens: []string{tokenAlice, tokenBob}}
-	svc := NewService(repo, newFakeStore(), nil, nil, testOptions())
+	svc := NewService(repo, newFakeStore(), nil, nil, nil, testOptions())
 
 	return NewHandler(svc, sessions, nil, allowedOrigins), repo, sessions
 }
@@ -174,7 +174,7 @@ func TestRoomSocketRefusesAHandshakeThereIsNoRoomFor(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			repo := newFakeRepository(tokenAlice, tokenBob)
 			sessions := &stubAuthenticator{tokens: []string{tokenAlice}}
-			svc := NewService(repo, newFakeStore(), nil, nil, testOptions())
+			svc := NewService(repo, newFakeStore(), nil, nil, nil, testOptions())
 			connections := &stubConnectionLimiter{err: tc.err}
 			h := NewHandler(svc, sessions, connections, nil)
 
@@ -201,7 +201,7 @@ func TestRoomSocketRefusesAHandshakeThereIsNoRoomFor(t *testing.T) {
 func TestRoomSocketGivesBackThePlaceOfAHandshakeItRefuses(t *testing.T) {
 	repo := newFakeRepository(tokenAlice, tokenBob)
 	sessions := &stubAuthenticator{tokens: []string{tokenAlice}}
-	svc := NewService(repo, newFakeStore(), nil, nil, testOptions())
+	svc := NewService(repo, newFakeStore(), nil, nil, nil, testOptions())
 	connections := &stubConnectionLimiter{}
 	h := NewHandler(svc, sessions, connections, nil)
 

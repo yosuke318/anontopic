@@ -93,11 +93,14 @@ func run() error {
 		CacheTTL: envDuration("TOPIC_CACHE_TTL", topic.DefaultCacheTTL),
 	})
 
+	bans := newBans(pool, rdb)
+
 	matches := matching.NewService(
 		matching.NewRedisStore(rdb),
 		matching.NewPostgresRepository(pool),
 		topics,
-		report.NewPostgresBanList(pool),
+		matchingBans{bans},
+		sessionIdentities{sessions},
 		limits,
 		matching.Options{
 			WaitTTL:       envDuration("MATCHING_WAIT_TTL", matching.DefaultWaitTTL),
@@ -112,11 +115,11 @@ func run() error {
 
 	filter := newModerationService(ctx, pool)
 
-	chats := newChatService(pool, rdb, limits, filter)
+	chats := newChatService(pool, rdb, limits, filter, bans)
 
 	// Only a participant of a conversation may report it, and the chat module
 	// is what knows who those are and holds what was said.
-	reports := report.NewService(report.NewPostgresRepository(pool), reportedConversations{chats})
+	reports := report.NewService(report.NewPostgresRepository(pool), reportedConversations{chats}, bans)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", handleHealth)
@@ -194,16 +197,84 @@ func handleReady(pool *pgxpool.Pool, rdb *redis.Client) http.HandlerFunc {
 }
 
 // newChatService builds the chat module from the environment.
-func newChatService(pool *pgxpool.Pool, rdb *redis.Client, limits *capacity.Service, filter *moderation.Service) *chat.Service {
+func newChatService(pool *pgxpool.Pool, rdb *redis.Client, limits *capacity.Service, filter *moderation.Service, bans *report.Bans) *chat.Service {
 	return chat.NewService(
 		chat.NewPostgresRepository(pool),
 		chat.NewRedisStore(rdb),
 		moderator{filter},
 		limits,
+		chatSanctions{bans},
 		chat.Options{
 			RejoinGrace: envDuration("CHAT_REJOIN_GRACE", chat.DefaultRejoinGrace),
 		},
 	)
+}
+
+// newBans builds the ban list the report module keeps, with the thresholds
+// that move an identifier up the stages of sanction.
+func newBans(pool *pgxpool.Pool, rdb *redis.Client) *report.Bans {
+	return report.NewBans(report.NewPostgresBanRepository(pool), report.NewRedisSanctionStore(rdb), report.BanOptions{
+		CacheTTL:          envDuration("SANCTION_BAN_CACHE_TTL", report.DefaultBanCacheTTL),
+		BlockedThreshold:  envInt("SANCTION_BLOCKED_THRESHOLD", report.DefaultBlockedThreshold),
+		BlockedWindow:     envDuration("SANCTION_BLOCKED_WINDOW", report.DefaultBlockedWindow),
+		ReportedThreshold: envInt("SANCTION_REPORTED_THRESHOLD", report.DefaultReportedThreshold),
+		ReportedWindow:    envDuration("SANCTION_REPORTED_WINDOW", report.DefaultReportedWindow),
+		Suspension:        envDuration("SANCTION_SUSPENSION", report.DefaultSuspension),
+		WarningTTL:        envDuration("SANCTION_WARNING_TTL", report.DefaultWarningTTL),
+	})
+}
+
+// matchingBans carries the ban check of the matching module to the ban list
+// the report module keeps.
+type matchingBans struct {
+	bans *report.Bans
+}
+
+func (b matchingBans) IsBanned(ctx context.Context, id matching.Identity) (bool, error) {
+	return b.bans.IsBanned(ctx, report.Identity(id))
+}
+
+// sessionIdentities reads the identifiers of a waiting user out of the
+// session module, for the matching module to record with the room.
+type sessionIdentities struct {
+	sessions *session.Service
+}
+
+func (s sessionIdentities) Identity(ctx context.Context, token string) (matching.Identity, error) {
+	sess, err := s.sessions.Lookup(ctx, token)
+	if err != nil {
+		return matching.Identity{}, err
+	}
+	return matching.Identity{IPHash: sess.IPHash, Device: sess.Device}, nil
+}
+
+// chatSanctions carries what the chat module asks of the ban list to the
+// report module, and the sanction it answers with into the chat module's
+// terms: a suspension and a permanent ban both end the connection.
+type chatSanctions struct {
+	bans *report.Bans
+}
+
+func (c chatSanctions) IsBanned(ctx context.Context, id chat.Identity) (bool, error) {
+	return c.bans.IsBanned(ctx, report.Identity(id))
+}
+
+func (c chatSanctions) RecordBlocked(ctx context.Context, id chat.Identity) (chat.Sanction, error) {
+	sanction, err := c.bans.RecordBlocked(ctx, report.Identity(id))
+	switch {
+	case err != nil:
+		return chat.SanctionNone, err
+	case sanction == report.SanctionWarning:
+		return chat.SanctionWarning, nil
+	case sanction == report.SanctionSuspension, sanction == report.SanctionPermanent:
+		return chat.SanctionBan, nil
+	default:
+		return chat.SanctionNone, nil
+	}
+}
+
+func (c chatSanctions) TakeWarning(ctx context.Context, id chat.Identity) (bool, error) {
+	return c.bans.TakeWarning(ctx, report.Identity(id))
 }
 
 // newModerationService builds the filter every message passes before its room
@@ -260,6 +331,19 @@ func (c reportedConversations) Flag(ctx context.Context, conversationID, reporte
 
 func (c reportedConversations) EndReported(ctx context.Context, conversationID string) error {
 	return c.chats.EndReported(ctx, conversationID)
+}
+
+func (c reportedConversations) Participants(ctx context.Context, conversationID string) ([]report.Participant, error) {
+	participants, err := c.chats.Participants(ctx, conversationID)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]report.Participant, 0, len(participants))
+	for _, p := range participants {
+		out = append(out, report.Participant{Token: p.Token, Identity: report.Identity(p.Identity)})
+	}
+	return out, nil
 }
 
 func (c reportedConversations) Transcript(ctx context.Context, conversationID string) (report.Transcript, error) {
