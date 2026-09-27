@@ -317,6 +317,9 @@ func (s *Service) BanParticipant(ctx context.Context, conversationID string, par
 	}
 
 	imp.ConversationID = conversationID
+	if s.bans == nil {
+		return Ban{}, fmt.Errorf("impose ban: bans are not served")
+	}
 	return s.bans.Impose(ctx, identifier, imp)
 }
 
