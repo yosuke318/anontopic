@@ -78,7 +78,8 @@ func (h *Handler) handleJoin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	state, err := h.svc.Join(r.Context(), token, h.sessions.IPHash(r), Queue(req))
+	id := Identity{IPHash: h.sessions.IPHash(r), Device: h.sessions.DeviceID(r)}
+	state, err := h.svc.Join(r.Context(), token, id, Queue(req))
 	if err != nil {
 		writeError(w, "join queue", err)
 		return
