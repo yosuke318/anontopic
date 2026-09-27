@@ -22,7 +22,7 @@ function messageForError(error: unknown): string {
       case 401:
         return "セッションを用意できませんでした。もう一度お試しください。";
       case 403:
-        return "現在このサービスはご利用いただけません。";
+        return "利用規約に反する利用があったため、現在この端末または回線からはご利用いただけません。";
       case 429:
         return error.retryAfterSeconds === null
           ? "短い間に何度も試されています。しばらく待ってからお試しください。"

@@ -52,6 +52,8 @@ const prohibitedLinkLabel = "禁止していることを見る";
 
 const noticeMessages: Record<NoticeKind, string> = {
   reconnected: "接続が戻りました。切れていた間に流れたメッセージは表示されません。",
+  warning:
+    "利用規約に反する送信や通報が続いたため、警告します。このまま続くと、一定期間または無期限でご利用いただけなくなります。",
   blocked: "送信した内容は配信されませんでした。",
   rate_limited: "送信が続いたため、いくつかのメッセージが配信されませんでした。",
   too_long: "本文が長すぎるメッセージは配信されませんでした。",
@@ -63,6 +65,7 @@ const noticeMessages: Record<NoticeKind, string> = {
 const endedMessages: Record<string, string> = {
   user_left: "参加者がいなくなったため、会話は終了しました。",
   reported: "参加者から通報があったため、会話は終了しました。",
+  banned: "利用規約に反する送信が続いたため、この端末からのご利用を停止しました。",
 };
 
 const endedFallback = "会話は終了しました。";
@@ -104,6 +107,18 @@ function roomTypeOf(roomType: number): RoomType {
 
 function Line({ children }: { children: string }) {
   return <p className="text-muted px-4 py-2 text-center text-xs leading-6">{children}</p>;
+}
+
+// Warningは運営からの警告を、部屋の流れの中で目立たせて出す。
+function Warning({ children }: { children: string }) {
+  return (
+    <p
+      role="alert"
+      className="border-danger text-danger mx-4 my-2 rounded-lg border px-4 py-3 text-sm leading-6"
+    >
+      {children}
+    </p>
+  );
 }
 
 export function ChatRoom({ conversationId, topics }: { conversationId: string; topics: Topic[] }) {
@@ -230,6 +245,9 @@ export function ChatRoom({ conversationId, topics }: { conversationId: string; t
 
   function renderItem(item: TimelineItem) {
     if (item.kind === "notice") {
+      if (item.notice === "warning") {
+        return <Warning key={item.id}>{noticeMessages.warning}</Warning>;
+      }
       return <Line key={item.id}>{noticeMessages[item.notice]}</Line>;
     }
 
