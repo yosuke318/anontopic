@@ -1,4 +1,4 @@
-.PHONY: help tools hooks up down downd reset logs migrate seed \
+.PHONY: help tools hooks up down downd reset logs migrate seed retention retention-dry-run \
 	build test lint fmt check \
 	backend-build backend-run backend-test backend-lint backend-fmt \
 	frontend-install frontend-build frontend-test frontend-lint frontend-typecheck frontend-format \
@@ -55,6 +55,12 @@ migrate: ## Apply the schema migrations to the local database
 
 seed: ## Load the seed data into the local database
 	DATABASE_URL=$(LOCAL_DATABASE_URL) go run ./cmd/seed
+
+retention: ## Run the retention batch against the local database
+	DATABASE_URL=$(LOCAL_DATABASE_URL) go run ./cmd/retention
+
+retention-dry-run: ## Log what the retention batch would do, changing nothing
+	DATABASE_URL=$(LOCAL_DATABASE_URL) go run ./cmd/retention -dry-run
 
 down: require-docker ## Stop the local stack, keeping the PostgreSQL and Redis volumes
 	docker compose down

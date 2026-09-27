@@ -148,6 +148,10 @@ type Repository interface {
 	// SetClaimStatus moves the claim id names to status and returns it as it
 	// is afterwards, or ErrNotFound.
 	SetClaimStatus(ctx context.Context, id int64, status string) (Claim, error)
+
+	// Reported returns the conversations among conversationIDs that have at
+	// least one report, each once.
+	Reported(ctx context.Context, conversationIDs []string) ([]string, error)
 }
 
 // Transcript is a conversation as the module that owns it recorded it.
@@ -216,7 +220,8 @@ type Service struct {
 
 // NewService builds a report service that records into repo and asks
 // conversations about the conversations reports name. A nil bans counts no
-// report towards a sanction, and serves no ban to operators.
+// report towards a sanction, and serves no ban to operators. A service with a
+// nil conversations only answers Reported.
 func NewService(repo Repository, conversations Conversations, bans *Bans) *Service {
 	return &Service{repo: repo, conversations: conversations, bans: bans}
 }
@@ -395,6 +400,17 @@ func (s *Service) UpdateStatus(ctx context.Context, id int64, status string) (Re
 		return Report{}, ErrUnknownStatus
 	}
 	return s.repo.SetStatus(ctx, id, status)
+}
+
+// Reported returns the conversations among conversationIDs that were
+// reported, whatever the review of the report came to. A reported
+// conversation is kept past the retention period, so that the conversation
+// a report was decided on can still be read.
+func (s *Service) Reported(ctx context.Context, conversationIDs []string) ([]string, error) {
+	if len(conversationIDs) == 0 {
+		return nil, nil
+	}
+	return s.repo.Reported(ctx, conversationIDs)
 }
 
 // normalizeFilter refuses a status outside the fixed set and bounds the size

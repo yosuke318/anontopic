@@ -30,15 +30,29 @@ FROM topics t
 WHERE t.name = '相談'
 ON CONFLICT (id) DO NOTHING;
 
--- 保持期間（90 日）を超えた会話。削除バッチの対象になる。
+-- 保持期間（90 日）を超えた会話。削除バッチでメッセージが消える。130 日前に置くのは、
+-- 月の長さによらず、移行前の月次パーティションごと期限を過ぎているようにするため。
 INSERT INTO conversations (id, topic_id, room_type, started_at, ended_at, end_reason, is_flagged)
 SELECT
     '33333333-3333-3333-3333-333333333333'::uuid,
     t.id, 2,
-    now() - interval '100 days',
-    now() - interval '100 days' + interval '5 minutes',
+    now() - interval '130 days',
+    now() - interval '130 days' + interval '5 minutes',
     'timeout',
     false
+FROM topics t
+WHERE t.name = 'ゲーム'
+ON CONFLICT (id) DO NOTHING;
+
+-- 保持期間を超えているが通報された会話。削除バッチでメッセージが retained_messages に移り、残る。
+INSERT INTO conversations (id, topic_id, room_type, started_at, ended_at, end_reason, is_flagged)
+SELECT
+    '44444444-4444-4444-4444-444444444444'::uuid,
+    t.id, 2,
+    now() - interval '130 days',
+    now() - interval '130 days' + interval '4 minutes',
+    'reported',
+    true
 FROM topics t
 WHERE t.name = 'ゲーム'
 ON CONFLICT (id) DO NOTHING;
@@ -51,12 +65,15 @@ FROM (VALUES
     ('22222222-2222-2222-2222-222222222222', 'devseed-conv2-participant-a', now() - interval '1 day'),
     ('22222222-2222-2222-2222-222222222222', 'devseed-conv2-participant-b', now() - interval '1 day'),
     ('22222222-2222-2222-2222-222222222222', 'devseed-conv2-participant-c', now() - interval '1 day'),
-    ('33333333-3333-3333-3333-333333333333', 'devseed-conv3-participant-a', now() - interval '100 days'),
-    ('33333333-3333-3333-3333-333333333333', 'devseed-conv3-participant-b', now() - interval '100 days')
+    ('33333333-3333-3333-3333-333333333333', 'devseed-conv3-participant-a', now() - interval '130 days'),
+    ('33333333-3333-3333-3333-333333333333', 'devseed-conv3-participant-b', now() - interval '130 days'),
+    ('44444444-4444-4444-4444-444444444444', 'devseed-conv4-participant-a', now() - interval '130 days'),
+    ('44444444-4444-4444-4444-444444444444', 'devseed-conv4-participant-b', now() - interval '130 days')
 ) AS seed(conversation_id, session_token, joined_at)
 ON CONFLICT (conversation_id, session_token) DO NOTHING;
 
--- 会話 2 は参加者 a が通報しているため、a 以外の発言は moderation_flag が 2（通報あり）。
+-- 会話 2 は参加者 a が、会話 4 は参加者 b が通報しているため、通報者以外の発言は
+-- moderation_flag が 2（通報あり）。
 INSERT INTO messages (conversation_id, sender_token, body, moderation_flag, created_at)
 SELECT seed.conversation_id::uuid, seed.sender_token, seed.body, seed.moderation_flag, seed.created_at
 FROM (VALUES
@@ -68,8 +85,11 @@ FROM (VALUES
     ('22222222-2222-2222-2222-222222222222', 'devseed-conv2-participant-b', 'うん', 2, now() - interval '1 day' + interval '2 minutes'),
     ('22222222-2222-2222-2222-222222222222', 'devseed-conv2-participant-b', 'うん', 2, now() - interval '1 day' + interval '3 minutes'),
     ('22222222-2222-2222-2222-222222222222', 'devseed-conv2-participant-c', '規約違反として通報された発言', 2, now() - interval '1 day' + interval '5 minutes'),
-    ('33333333-3333-3333-3333-333333333333', 'devseed-conv3-participant-a', '最近やってるゲームある？', 0, now() - interval '100 days'),
-    ('33333333-3333-3333-3333-333333333333', 'devseed-conv3-participant-b', 'ずっと同じのやってる', 0, now() - interval '100 days' + interval '2 minutes')
+    ('33333333-3333-3333-3333-333333333333', 'devseed-conv3-participant-a', '最近やってるゲームある？', 0, now() - interval '130 days'),
+    ('33333333-3333-3333-3333-333333333333', 'devseed-conv3-participant-b', 'ずっと同じのやってる', 0, now() - interval '130 days' + interval '2 minutes'),
+    ('44444444-4444-4444-4444-444444444444', 'devseed-conv4-participant-a', 'フレンドコード交換しない？', 2, now() - interval '130 days'),
+    ('44444444-4444-4444-4444-444444444444', 'devseed-conv4-participant-b', 'そういうのはちょっと', 0, now() - interval '130 days' + interval '1 minute'),
+    ('44444444-4444-4444-4444-444444444444', 'devseed-conv4-participant-a', 'じゃあ別のアプリで話そう', 2, now() - interval '130 days' + interval '2 minutes')
 ) AS seed(conversation_id, sender_token, body, moderation_flag, created_at)
 -- 同じ送信者が同じ本文を繰り返すことは普通に起きるため、本文ではメッセージを
 -- 区別できない。会話単位で投入済みかどうかを見る。
@@ -90,6 +110,19 @@ WHERE NOT EXISTS (
     SELECT 1
     FROM reports r
     WHERE r.conversation_id = '22222222-2222-2222-2222-222222222222'::uuid
+);
+
+INSERT INTO reports (conversation_id, reporter_token, reason, status, created_at)
+SELECT
+    '44444444-4444-4444-4444-444444444444'::uuid,
+    'devseed-conv4-participant-b',
+    'contact',
+    'actioned',
+    now() - interval '130 days' + interval '3 minutes'
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM reports r
+    WHERE r.conversation_id = '44444444-4444-4444-4444-444444444444'::uuid
 );
 
 -- 利用者ではない人から届いた権利侵害の申し立て。

@@ -191,3 +191,25 @@ func TestPostgresRepositoryStoresAndMovesClaims(t *testing.T) {
 		t.Fatalf("claims = %+v, want the claim that was moved", claims)
 	}
 }
+
+func TestPostgresRepositoryReadsWhichConversationsWereReported(t *testing.T) {
+	repo := postgresTestRepository(t)
+	ctx := t.Context()
+
+	reported := openConversation(t, repo)
+	unreported := openConversation(t, repo)
+
+	for _, token := range []string{"first-reporter", "second-reporter"} {
+		if err := repo.Add(ctx, Report{ConversationID: reported, ReporterToken: token, Reason: ReasonSpam}); err != nil {
+			t.Fatalf("Add: %v", err)
+		}
+	}
+
+	got, err := repo.Reported(ctx, []string{reported, unreported})
+	if err != nil {
+		t.Fatalf("Reported: %v", err)
+	}
+	if len(got) != 1 || got[0] != reported {
+		t.Fatalf("Reported = %v, want only %s once", got, reported)
+	}
+}

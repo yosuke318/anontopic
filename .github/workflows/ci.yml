@@ -63,6 +63,11 @@ jobs:
         run: |
           make migrate
           make seed
+      # シードには保持期間を過ぎた会話が入っているため、削除と退避の両方の経路を通る。
+      - name: 保持期間バッチを流せることを確かめる
+        run: |
+          make retention-dry-run
+          make retention
       - name: 巻き戻せることを確かめる
         run: go run ./cmd/migrate down
 
