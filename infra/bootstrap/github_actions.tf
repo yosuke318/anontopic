@@ -5,8 +5,15 @@ data "aws_iam_openid_connect_provider" "github" {
 }
 
 # plan 用。pull request と main への push から引き受けられる。
+#
+# リポジトリの照合は sub ではなく repository クレームで行う。GitHub は組織やリポジトリの
+# 名前が変わったことを検知すると、sub を "repo:owner@<owner_id>/repo@<repo_id>:..." という
+# ID 付きの形式に変える。repository クレームは常に "owner/repo" のままなので、
+# この揺れの影響を受けない。pull request と main への push は event_name と ref の
+# クレームで区別する。
 data "aws_iam_policy_document" "terraform_plan_trust" {
   statement {
+    sid     = "PullRequest"
     actions = ["sts:AssumeRoleWithWebIdentity"]
 
     principals {
@@ -22,11 +29,48 @@ data "aws_iam_policy_document" "terraform_plan_trust" {
 
     condition {
       test     = "StringEquals"
-      variable = "token.actions.githubusercontent.com:sub"
-      values = [
-        "repo:${var.github_repository}:pull_request",
-        "repo:${var.github_repository}:ref:refs/heads/main",
-      ]
+      variable = "token.actions.githubusercontent.com:repository"
+      values   = [var.github_repository]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:event_name"
+      values   = ["pull_request"]
+    }
+  }
+
+  statement {
+    sid     = "PushToMain"
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [data.aws_iam_openid_connect_provider.github.arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:repository"
+      values   = [var.github_repository]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:event_name"
+      values   = ["push"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:ref"
+      values   = ["refs/heads/main"]
     }
   }
 }
@@ -58,6 +102,7 @@ resource "aws_iam_role_policy" "terraform_plan_state_lock" {
 
 # apply 用。GitHub の Environment（dev / prod）を指定したジョブからだけ引き受けられる。
 # どのブランチから、誰の承認で apply できるかは Environment の保護ルールで絞る。
+# plan 用と同じ理由で、リポジトリの照合は sub ではなく repository クレームで行う。
 data "aws_iam_policy_document" "terraform_apply_trust" {
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]
@@ -75,11 +120,14 @@ data "aws_iam_policy_document" "terraform_apply_trust" {
 
     condition {
       test     = "StringEquals"
-      variable = "token.actions.githubusercontent.com:sub"
-      values = [
-        "repo:${var.github_repository}:environment:dev",
-        "repo:${var.github_repository}:environment:prod",
-      ]
+      variable = "token.actions.githubusercontent.com:repository"
+      values   = [var.github_repository]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:environment"
+      values   = ["dev", "prod"]
     }
   }
 }
