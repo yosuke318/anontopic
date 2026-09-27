@@ -41,6 +41,10 @@ func (a *stubAuthenticator) Authenticate(r *http.Request) (string, error) {
 // request a test sends comes from the same one.
 func (a *stubAuthenticator) IPHash(*http.Request) string { return "test-ip-hash" }
 
+// DeviceID stands for the device ID the request carries. Every request a test
+// sends comes from the same device.
+func (a *stubAuthenticator) DeviceID(*http.Request) string { return "test-device" }
+
 // stubConnectionLimiter answers every handshake with err, and counts the
 // places it handed out and took back.
 type stubConnectionLimiter struct {
@@ -308,6 +312,25 @@ func (r *fakeRepository) Conversation(_ context.Context, id string) (Conversatio
 	return conv, nil
 }
 
+// Participants names the identifiers of every participant after their token.
+func (r *fakeRepository) Participants(_ context.Context, id string) ([]Participant, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if id != r.conv.ID {
+		return nil, nil
+	}
+
+	participants := make([]Participant, 0, len(r.conv.Participants))
+	for _, token := range r.conv.Participants {
+		participants = append(participants, Participant{
+			Token:    token,
+			Identity: Identity{IPHash: "ip-hash-" + token, Device: "device-" + token},
+		})
+	}
+	return participants, nil
+}
+
 func (r *fakeRepository) AddMessages(_ context.Context, messages []Message) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -437,7 +460,15 @@ func testOptions() Options {
 func newTestServer(t *testing.T, repo Repository, store Store, moderator Moderator, messages MessageLimiter, opts Options, tokens ...string) *httptest.Server {
 	t.Helper()
 
-	svc := NewService(repo, store, moderator, messages, opts)
+	return newSanctionedTestServer(t, repo, store, moderator, messages, nil, opts, tokens...)
+}
+
+// newSanctionedTestServer starts one server that counts blocked messages
+// through sanctions.
+func newSanctionedTestServer(t *testing.T, repo Repository, store Store, moderator Moderator, messages MessageLimiter, sanctions Sanctions, opts Options, tokens ...string) *httptest.Server {
+	t.Helper()
+
+	svc := NewService(repo, store, moderator, messages, sanctions, opts)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()

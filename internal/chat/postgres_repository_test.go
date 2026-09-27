@@ -119,6 +119,36 @@ func TestPostgresRepositoryReadsAConversationWithItsParticipants(t *testing.T) {
 	}
 }
 
+func TestPostgresRepositoryReadsTheIdentifiersOfTheParticipants(t *testing.T) {
+	repo := postgresTestRepository(t)
+	ctx := t.Context()
+	id := testConversation(t, repo, "first-token", "second-token")
+
+	if _, err := repo.pool.Exec(ctx,
+		"UPDATE conversation_participants SET ip_hash = 'ip-hash-first', device_fingerprint = 'device-first' "+
+			"WHERE conversation_id = $1 AND session_token = 'first-token'", id); err != nil {
+		t.Fatalf("record identifiers: %v", err)
+	}
+
+	participants, err := repo.Participants(ctx, id)
+	if err != nil {
+		t.Fatalf("Participants: %v", err)
+	}
+
+	// A participant recorded without identifiers is read with empty ones.
+	want := []Participant{
+		{Token: "first-token", Identity: Identity{IPHash: "ip-hash-first", Device: "device-first"}},
+		{Token: "second-token"},
+	}
+	if !slices.Equal(participants, want) {
+		t.Fatalf("participants = %+v, want %+v", participants, want)
+	}
+
+	if got, err := repo.Participants(ctx, "1c8f"); err != nil || len(got) != 0 {
+		t.Fatalf("Participants of an id that is no id = %+v, %v, want none", got, err)
+	}
+}
+
 func TestPostgresRepositoryReportsAConversationItCannotRead(t *testing.T) {
 	repo := postgresTestRepository(t)
 
