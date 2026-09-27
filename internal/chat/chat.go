@@ -497,7 +497,7 @@ func (s *Service) end(ctx context.Context, conversationID, reason string) {
 
 // handleFrame acts on one frame a client sent.
 func (s *Service) handleFrame(ctx context.Context, c *conn, data []byte) {
-	if c.banned.Load() {
+	if s.cutOffIfBanned(ctx, c) {
 		return
 	}
 
@@ -616,9 +616,44 @@ func (s *Service) sanctionBlocked(ctx context.Context, c *conn) {
 	case SanctionWarning:
 		s.showWarning(ctx, c)
 	case SanctionBan:
-		c.banned.Store(true)
-		c.send(serverEvent{Type: eventEnded, Reason: endReasonBanned})
+		s.endBanned(c)
 	}
+}
+
+// cutOffIfBanned reports whether the participant is under a ban, and ends
+// their connection if they are. The handshake checks the ban list once, so
+// a ban imposed while the connection is open, by an operator or by the
+// reports counted against the participant, is found here on their next frame
+// and on the next beat of the heartbeat.
+// A ban list that cannot be read lets the frame through: the connection was
+// admitted, and a failing Redis must not cut off everyone in a room.
+func (s *Service) cutOffIfBanned(ctx context.Context, c *conn) bool {
+	if c.banned.Load() {
+		return true
+	}
+	if s.sanctions == nil {
+		return false
+	}
+
+	banned, err := s.sanctions.IsBanned(ctx, c.identity)
+	if err != nil {
+		slog.Error("read ban list",
+			slog.String("conversation_id", c.conversationID), slog.Any("error", err))
+		return false
+	}
+	if !banned {
+		return false
+	}
+
+	s.endBanned(c)
+	return true
+}
+
+// endBanned tells the participant they were banned and ends their connection
+// once the event is written. Nothing they send after that is taken.
+func (s *Service) endBanned(c *conn) {
+	c.banned.Store(true)
+	c.send(serverEvent{Type: eventEnded, Reason: endReasonBanned})
 }
 
 // showWarning sends the warning that waits for the participant, if one does.
