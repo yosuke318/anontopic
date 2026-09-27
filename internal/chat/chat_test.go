@@ -285,9 +285,9 @@ func TestAFrameTheRoomCannotReadIsAnswered(t *testing.T) {
 
 func TestAdmitRefusesAnyoneTheConversationWasNotFormedFor(t *testing.T) {
 	repo := newFakeRepository(tokenAlice, tokenBob)
-	svc := NewService(repo, newFakeStore(), nil, nil, testOptions())
+	svc := NewService(repo, newFakeStore(), nil, nil, nil, testOptions())
 
-	adm, err := svc.Admit(context.Background(), repo.conv.ID, tokenBob)
+	adm, err := svc.Admit(context.Background(), repo.conv.ID, tokenBob, Identity{})
 	if err != nil {
 		t.Fatalf("Admit(a participant) = %v, want an admission", err)
 	}
@@ -295,24 +295,24 @@ func TestAdmitRefusesAnyoneTheConversationWasNotFormedFor(t *testing.T) {
 		t.Fatalf("participant = %d, want 2", adm.Participant)
 	}
 
-	if _, err := svc.Admit(context.Background(), repo.conv.ID, "someone-elses-token"); !errors.Is(err, ErrNotParticipant) {
+	if _, err := svc.Admit(context.Background(), repo.conv.ID, "someone-elses-token", Identity{}); !errors.Is(err, ErrNotParticipant) {
 		t.Fatalf("Admit(a stranger) = %v, want %v", err, ErrNotParticipant)
 	}
-	if _, err := svc.Admit(context.Background(), "1c8f", tokenAlice); !errors.Is(err, ErrConversationNotFound) {
+	if _, err := svc.Admit(context.Background(), "1c8f", tokenAlice, Identity{}); !errors.Is(err, ErrConversationNotFound) {
 		t.Fatalf("Admit(an unknown conversation) = %v, want %v", err, ErrConversationNotFound)
 	}
 
 	if _, err := repo.End(context.Background(), repo.conv.ID, endReasonUserLeft, time.Now().UTC()); err != nil {
 		t.Fatalf("end the conversation: %v", err)
 	}
-	if _, err := svc.Admit(context.Background(), repo.conv.ID, tokenAlice); !errors.Is(err, ErrConversationEnded) {
+	if _, err := svc.Admit(context.Background(), repo.conv.ID, tokenAlice, Identity{}); !errors.Is(err, ErrConversationEnded) {
 		t.Fatalf("Admit(an ended conversation) = %v, want %v", err, ErrConversationEnded)
 	}
 }
 
 func TestIsParticipantAnswersForConversationsThatAreOver(t *testing.T) {
 	repo := newFakeRepository(tokenAlice, tokenBob)
-	svc := NewService(repo, newFakeStore(), nil, nil, testOptions())
+	svc := NewService(repo, newFakeStore(), nil, nil, nil, testOptions())
 	ctx := context.Background()
 
 	if _, err := repo.End(ctx, repo.conv.ID, endReasonUserLeft, time.Now().UTC()); err != nil {

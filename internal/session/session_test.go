@@ -291,3 +291,22 @@ func TestIPHashReadsForwardedForOnlyWhenTrusted(t *testing.T) {
 		t.Fatal("IPHash did not take the last X-Forwarded-For entry")
 	}
 }
+
+func TestLookupReadsASessionWithoutExtendingIt(t *testing.T) {
+	svc, clock := newTestService(t)
+	sess := mustIssue(t, svc, "203.0.113.7:4242")
+
+	clock.Advance(DefaultIdleTTL - time.Minute)
+	got, err := svc.Lookup(context.Background(), sess.Token)
+	if err != nil {
+		t.Fatalf("Lookup: %v", err)
+	}
+	if got.IPHash != sess.IPHash || got.Device != sess.Device || got.Device == "" {
+		t.Fatalf("Lookup = %+v, want the identifiers of %+v", got, sess)
+	}
+
+	clock.Advance(time.Minute)
+	if _, err := svc.Lookup(context.Background(), sess.Token); !errors.Is(err, ErrInvalidSession) {
+		t.Fatalf("Lookup after the idle window = %v, want %v", err, ErrInvalidSession)
+	}
+}

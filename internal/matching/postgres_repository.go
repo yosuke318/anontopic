@@ -27,7 +27,7 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 // (conversation_id, session_token) is unique, which lets the insert ignore a
 // token that appears twice; the reasoning is in
 // docs/adr/0003-one-row-per-conversation-participant.md.
-func (r *PostgresRepository) CreateConversation(ctx context.Context, topicID int, participants []string) (Conversation, error) {
+func (r *PostgresRepository) CreateConversation(ctx context.Context, topicID int, participants []Participant) (Conversation, error) {
 	// The room type counts the participants, while the unique constraint keeps
 	// one row per token. A token appearing twice would make the two disagree,
 	// and the number of participants is read from the rows.
@@ -62,25 +62,27 @@ func (r *PostgresRepository) CreateConversation(ctx context.Context, topicID int
 }
 
 // duplicate returns the first token participants holds more than once.
-func duplicate(participants []string) (string, bool) {
+func duplicate(participants []Participant) (string, bool) {
 	seen := make(map[string]struct{}, len(participants))
-	for _, token := range participants {
-		if _, ok := seen[token]; ok {
-			return token, true
+	for _, p := range participants {
+		if _, ok := seen[p.Token]; ok {
+			return p.Token, true
 		}
-		seen[token] = struct{}{}
+		seen[p.Token] = struct{}{}
 	}
 	return "", false
 }
 
-// insertParticipants records every participant of one conversation.
-func insertParticipants(ctx context.Context, tx pgx.Tx, conversationID string, participants []string) error {
+// insertParticipants records every participant of one conversation. An
+// identifier that is not known is written as NULL.
+func insertParticipants(ctx context.Context, tx pgx.Tx, conversationID string, participants []Participant) error {
 	batch := &pgx.Batch{}
-	for _, token := range participants {
+	for _, p := range participants {
 		batch.Queue(
-			"INSERT INTO conversation_participants (conversation_id, session_token) "+
-				"VALUES ($1, $2) ON CONFLICT DO NOTHING",
-			conversationID, token)
+			"INSERT INTO conversation_participants "+
+				"(conversation_id, session_token, ip_hash, device_fingerprint) "+
+				"VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, '')) ON CONFLICT DO NOTHING",
+			conversationID, p.Token, p.Identity.IPHash, p.Identity.Device)
 	}
 
 	if err := tx.SendBatch(ctx, batch).Close(); err != nil {

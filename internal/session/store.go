@@ -12,7 +12,10 @@ var ErrNotStored = errors.New("session: token not stored")
 
 // Record is the state a Store keeps for one token.
 type Record struct {
-	IPHash   string
+	IPHash string
+	// Device is the device ID the client held when the session was issued.
+	// It is empty for a session issued before the client held one.
+	Device   string
 	IssuedAt time.Time
 }
 

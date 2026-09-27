@@ -46,6 +46,8 @@ channels:
         $ref: "#/components/messages/message"
       ended:
         $ref: "#/components/messages/ended"
+      warning:
+        $ref: "#/components/messages/warning"
       error:
         $ref: "#/components/messages/error"
 
@@ -65,6 +67,9 @@ operations:
       受け取った本文はモデレーションにかけ、ブロックされたものは誰にも配らず送信者に
       `blocked` と止めた理由の分類を返す。ブロックされた本文も `moderation_flag` を立てて保存する。
       配るものは保存のために受け付けてから部屋に流す。
+
+      ブロックは送信者の端末 ID ごとに数え、しきい値に達すると段階的制裁が進む。警告なら
+      `warning` を、一時停止か恒久停止なら `ended`（`reason: banned`）を送信者にだけ返す。
     messages:
       - $ref: "#/channels/room/messages/clientMessage"
 
@@ -74,8 +79,8 @@ operations:
       $ref: "#/channels/room"
     title: 部屋のイベントを送る
     description: |
-      サーバーから届くイベント。`error` だけは送信者にしか届かず、それ以外は部屋の
-      全員に同じものが届く（発言者にも自分の発言が届く）。
+      サーバーから届くイベント。`error` と `warning`、`reason` が `banned` の `ended` は
+      本人にしか届かず、それ以外は部屋の全員に同じものが届く（発言者にも自分の発言が届く）。
 
       サーバーは 30 秒ごとに ping を送るため、ブラウザ以外のクライアントは pong を
       返す必要がある。
@@ -85,6 +90,7 @@ operations:
       - $ref: "#/channels/room/messages/participantLeft"
       - $ref: "#/channels/room/messages/message"
       - $ref: "#/channels/room/messages/ended"
+      - $ref: "#/channels/room/messages/warning"
       - $ref: "#/channels/room/messages/error"
 
 components:
@@ -205,6 +211,12 @@ components:
 
         参加者の誰かが `POST /api/reports` で通報した場合も、その時点で全員に届いて終わる。
         理由は [ADR-0021](adr/0021-end-and-keep-a-conversation-once-it-is-reported.md) にある。
+
+        参加者が会話の途中で一時停止か恒久停止になった場合は、`reason: banned` がその
+        参加者にだけ届き、その接続だけが閉じる。NG ワードでのブロックが続いた場合は
+        その場で切る。運営が管理 API でかけた BAN や、通報が重なった場合は、接続中の参加者を
+        5 秒おきに確認しているため、長くても 5 秒ほどで切れる（その間に送信があれば、その時点で切る）。
+        会話は続く。
       contentType: application/json
       payload:
         type: object
@@ -217,10 +229,30 @@ components:
             type: string
             description: |
               `conversations.end_reason` の値。参加者が居なくなった終了は `user_left`、
-              通報による終了は `reported`。
+              通報による終了は `reported`。BAN された本人にだけ届く終了は `banned` で、
+              これは `conversations.end_reason` には記録しない。
             examples:
               - user_left
               - reported
+              - banned
+
+    warning:
+      name: warning
+      title: 運営からの警告
+      description: |
+        段階的制裁の最初の段階。本人にだけ届き、利用は止めない。
+
+        NG ワードでのブロックが続いたときはその場で届く。通報が続いた場合など、
+        接続していない間に出た警告は、次に部屋へ入ったとき `joined` の後に届く。
+        1 つの警告は 1 回だけ届く。
+      contentType: application/json
+      payload:
+        type: object
+        required: [type]
+        properties:
+          type:
+            type: string
+            const: warning
 
     error:
       name: error

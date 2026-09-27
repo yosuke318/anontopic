@@ -20,7 +20,7 @@ func TestEndReportedEndsTheConversationAndTellsTheRoom(t *testing.T) {
 
 	// The report is taken by whichever server the request reached, which need
 	// not be the one holding the room's connections.
-	other := NewService(repo, store, nil, nil, testOptions())
+	other := NewService(repo, store, nil, nil, nil, testOptions())
 	t.Cleanup(func() { _ = other.Close(context.Background()) })
 
 	if err := other.EndReported(t.Context(), repo.conv.ID); err != nil {
@@ -41,7 +41,7 @@ func TestEndReportedEndsTheConversationAndTellsTheRoom(t *testing.T) {
 
 func TestEndReportedLeavesAConversationThatIsOverAsItEnded(t *testing.T) {
 	repo := newFakeRepository(tokenAlice, tokenBob)
-	svc := NewService(repo, newFakeStore(), nil, nil, testOptions())
+	svc := NewService(repo, newFakeStore(), nil, nil, nil, testOptions())
 	t.Cleanup(func() { _ = svc.Close(context.Background()) })
 
 	if _, err := repo.End(t.Context(), repo.conv.ID, endReasonUserLeft, time.Now().UTC()); err != nil {

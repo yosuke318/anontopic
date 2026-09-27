@@ -19,6 +19,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 )
@@ -124,11 +125,31 @@ type State struct {
 }
 
 // SessionAuthenticator resolves the session a request carries and returns the
-// token identifying the participant, plus the hashed address the session was
-// issued to.
+// token identifying the participant, plus the hashed address and the device
+// ID the request came with.
 type SessionAuthenticator interface {
 	Authenticate(r *http.Request) (string, error)
 	IPHash(r *http.Request) string
+	DeviceID(r *http.Request) string
+}
+
+// Identity is what one user is told apart by for the ban list. Either field
+// is empty when it is not known.
+type Identity struct {
+	IPHash string
+	Device string
+}
+
+// Participant is one participant of a room being formed.
+type Participant struct {
+	Token    string
+	Identity Identity
+}
+
+// Identities reads the identifiers of the session behind a token, for the
+// users who are in a room without a request of their own being served.
+type Identities interface {
+	Identity(ctx context.Context, token string) (Identity, error)
 }
 
 // RequestLimiter reports whether an address may ask to be matched again now,
@@ -142,18 +163,20 @@ type TopicCatalogue interface {
 	IsActive(ctx context.Context, id int) (bool, error)
 }
 
-// BanList reports whether an identifier is barred from the service.
+// BanList reports whether any identifier of a user is barred from the
+// service.
 type BanList interface {
-	IsBanned(ctx context.Context, ipHash string) (bool, error)
+	IsBanned(ctx context.Context, id Identity) (bool, error)
 }
 
 // Service puts users in a queue and forms rooms out of it.
 type Service struct {
-	store  Store
-	repo   Repository
-	topics TopicCatalogue
-	bans   BanList
-	rate   RequestLimiter
+	store      Store
+	repo       Repository
+	topics     TopicCatalogue
+	bans       BanList
+	identities Identities
+	rate       RequestLimiter
 
 	waitTTL       time.Duration
 	fallbackAfter time.Duration
@@ -173,9 +196,10 @@ type Options struct {
 	RoomTTL time.Duration
 }
 
-// NewService builds a Service. A nil rate limiter takes requests to be
+// NewService builds a Service. A nil identities records no identifier with
+// the participants of a room, and a nil rate limiter takes requests to be
 // matched however fast they arrive.
-func NewService(store Store, repo Repository, topics TopicCatalogue, bans BanList, rate RequestLimiter, opts Options) *Service {
+func NewService(store Store, repo Repository, topics TopicCatalogue, bans BanList, identities Identities, rate RequestLimiter, opts Options) *Service {
 	if opts.WaitTTL <= 0 {
 		opts.WaitTTL = DefaultWaitTTL
 	}
@@ -191,6 +215,7 @@ func NewService(store Store, repo Repository, topics TopicCatalogue, bans BanLis
 		repo:          repo,
 		topics:        topics,
 		bans:          bans,
+		identities:    identities,
 		rate:          rate,
 		waitTTL:       opts.WaitTTL,
 		fallbackAfter: opts.FallbackAfter,
@@ -201,12 +226,12 @@ func NewService(store Store, repo Repository, topics TopicCatalogue, bans BanLis
 
 // Join puts the user behind token in the queue q names and tries to form a
 // room out of it. The returned State says whether the user got one.
-func (s *Service) Join(ctx context.Context, token, ipHash string, q Queue) (State, error) {
+func (s *Service) Join(ctx context.Context, token string, id Identity, q Queue) (State, error) {
 	if q.RoomType != roomTypeTwo && q.RoomType != roomTypeThree {
 		return State{}, ErrInvalidRoomType
 	}
 
-	allowed, retryAfter, err := s.allowMatch(ctx, ipHash)
+	allowed, retryAfter, err := s.allowMatch(ctx, id.IPHash)
 	if err != nil {
 		return State{}, fmt.Errorf("read the matching rate: %w", err)
 	}
@@ -214,7 +239,7 @@ func (s *Service) Join(ctx context.Context, token, ipHash string, q Queue) (Stat
 		return State{}, tooManyRequests{after: retryAfter}
 	}
 
-	banned, err := s.bans.IsBanned(ctx, ipHash)
+	banned, err := s.bans.IsBanned(ctx, id)
 	if err != nil {
 		return State{}, fmt.Errorf("read ban list: %w", err)
 	}
@@ -304,7 +329,7 @@ func (s *Service) form(ctx context.Context, q Queue) error {
 		return nil
 	}
 
-	conv, err := s.repo.CreateConversation(ctx, q.TopicID, participants)
+	conv, err := s.repo.CreateConversation(ctx, q.TopicID, s.identify(ctx, participants))
 	if err != nil {
 		createErr := fmt.Errorf("create conversation: %w", err)
 
@@ -320,4 +345,26 @@ func (s *Service) form(ctx context.Context, q Queue) error {
 		return fmt.Errorf("assign room: %w", err)
 	}
 	return nil
+}
+
+// identify reads the identifiers of every participant of a room. A
+// participant whose identifiers cannot be read joins the room all the same,
+// without them: the room is already taken out of the queue, and the
+// identifiers only matter to a sanction that may never come.
+func (s *Service) identify(ctx context.Context, tokens []string) []Participant {
+	participants := make([]Participant, len(tokens))
+	for i, token := range tokens {
+		participants[i].Token = token
+		if s.identities == nil {
+			continue
+		}
+
+		id, err := s.identities.Identity(ctx, token)
+		if err != nil {
+			slog.Warn("read the identifiers of a participant", slog.Any("error", err))
+			continue
+		}
+		participants[i].Identity = id
+	}
+	return participants
 }

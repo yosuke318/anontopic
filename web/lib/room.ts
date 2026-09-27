@@ -34,6 +34,7 @@ export type RoomEvent =
   | { type: "participant_left"; participant: number; present: number[] }
   | { type: "message"; participant: number; body: string; sentAt: string }
   | { type: "ended"; reason: string }
+  | { type: "warning" }
   | { type: "error"; code: RoomErrorCode; message: string; reason: BlockReason | null };
 
 // roomSocketUrlは会話につなぐWebSocketのURLを組み立てる。オリジンを別に指定
@@ -126,6 +127,8 @@ export function parseRoomEvent(data: string): RoomEvent | null {
     }
     case "ended":
       return { type: "ended", reason: typeof frame.reason === "string" ? frame.reason : "" };
+    case "warning":
+      return { type: "warning" };
     case "error": {
       const code = roomErrorCodes.find((known) => known === frame.code);
       if (code === undefined) {
