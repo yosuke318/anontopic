@@ -118,6 +118,22 @@ func (r *PostgresRepository) SetClaimStatus(ctx context.Context, id int64, statu
 	return collectOne(rows, scanClaim)
 }
 
+// Reported reads which of conversationIDs have a row in reports.
+func (r *PostgresRepository) Reported(ctx context.Context, conversationIDs []string) ([]string, error) {
+	rows, err := r.pool.Query(ctx,
+		"SELECT DISTINCT conversation_id::text FROM reports WHERE conversation_id = ANY($1::uuid[])",
+		conversationIDs)
+	if err != nil {
+		return nil, fmt.Errorf("select reported conversations: %w", err)
+	}
+
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("read reported conversations: %w", err)
+	}
+	return ids, nil
+}
+
 // filterClause builds the WHERE clause of f and the arguments it refers to.
 // Only the values go through arguments; the clause itself is built from fixed
 // fragments.

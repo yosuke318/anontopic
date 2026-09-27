@@ -365,7 +365,14 @@ APIサーバーの設定は環境変数で行う。
   `go run ./cmd/migrate down` で1つ戻せる。
 - シードは `db/seeds/`。`base/` は全環境、`dev/` は `APP_ENV=production` 以外でのみ入る。
   `dev/` には通報済みの会話や90日を超えた会話が含まれ、通報一覧や削除バッチの確認に使う。
-- `messages` は月次パーティション。初期マイグレーションが当月の前後10か月分を作る。
+- `messages` は UTC の 0 時で区切る日次パーティション。マイグレーションが今日から 14 日先までを作り、
+  その先の作成と 90 日を過ぎた分の削除は保持期間バッチ（`cmd/retention`）が受け持つ。
+  削除の前に、通報された会話のメッセージは `retained_messages` に移して残す。
+  行の入っている月次パーティションは、期限が来て削除されるまでそのまま使う。
+- 保持期間バッチは本番では深夜に 1 日 1 回スケジューラから起動する。失敗すると
+  `retention failed` を出して終了コード 1 で終わるので、そこにアラートを張る。
+  ローカルでは `make retention-dry-run` で予定を見てから `make retention` で流せる。
+  理由は [ADR-0026](docs/adr/0026-drop-daily-message-partitions-and-move-reported-messages-aside.md)。
 - テーブルとカラムの論理名は `COMMENT ON` でスキーマ自身に持たせる。別ファイルの定義書に
   すると実装とずれるため、テーブルを追加するときは論理名も同じマイグレーションに含める。
   `psql` で `\d+ topics` を実行すると確認できる。
@@ -433,6 +440,8 @@ make down          # 停止（データは残す）
 make downd         # 停止してデータも破棄
 make migrate       # スキーマだけ最新にする
 make seed          # データだけ入れ直す
+make retention-dry-run # 保持期間バッチの予定だけを見る
+make retention     # 保持期間バッチを流す
 
 make build         # backend-buildとfrontend-build
 make test          # backend-testとfrontend-test

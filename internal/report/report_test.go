@@ -116,6 +116,16 @@ func (f *fakeRepository) SetClaimStatus(_ context.Context, id int64, status stri
 	return Claim{}, ErrNotFound
 }
 
+func (f *fakeRepository) Reported(_ context.Context, conversationIDs []string) ([]string, error) {
+	var out []string
+	for _, r := range f.reports {
+		if slices.Contains(conversationIDs, r.ConversationID) && !slices.Contains(out, r.ConversationID) {
+			out = append(out, r.ConversationID)
+		}
+	}
+	return out, f.err
+}
+
 // fakeConversations answers for the conversations it was built with, and
 // remembers which were flagged and ended.
 type fakeConversations struct {
@@ -769,5 +779,30 @@ func TestAdminClaimEndpointsListAndMoveClaims(t *testing.T) {
 	}
 	if env.repo.claims[0].Status != StatusActioned {
 		t.Fatalf("status = %q, want %q", env.repo.claims[0].Status, StatusActioned)
+	}
+}
+
+func TestServiceAnswersWhichConversationsWereReported(t *testing.T) {
+	repo := &fakeRepository{}
+	svc := NewService(repo, nil, nil)
+	const other = "0b8e1f6a-3c2d-4e5f-8a9b-0c1d2e3f4a5b"
+
+	// Two reporters on one conversation still answer it once.
+	repo.reports = []Report{
+		{ID: 1, ConversationID: testConversation, ReporterToken: "a", Status: StatusRejected},
+		{ID: 2, ConversationID: testConversation, ReporterToken: "b", Status: StatusOpen},
+	}
+
+	got, err := svc.Reported(t.Context(), []string{testConversation, other})
+	if err != nil {
+		t.Fatalf("Reported: %v", err)
+	}
+	if !slices.Equal(got, []string{testConversation}) {
+		t.Fatalf("Reported = %v, want only %s", got, testConversation)
+	}
+
+	got, err = svc.Reported(t.Context(), nil)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("Reported(nil) = %v, %v, want none", got, err)
 	}
 }

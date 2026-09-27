@@ -80,6 +80,7 @@ func testConversation(t *testing.T, repo *PostgresRepository, participants ...st
 	t.Cleanup(func() {
 		ctx := context.Background()
 		for _, statement := range []string{
+			"DELETE FROM retained_messages WHERE conversation_id = $1",
 			"DELETE FROM messages WHERE conversation_id = $1",
 			"DELETE FROM conversation_participants WHERE conversation_id = $1",
 			"DELETE FROM conversations WHERE id = $1",
@@ -201,9 +202,9 @@ func TestPostgresRepositoryStoresMessagesInThePartitionOfTheirTime(t *testing.T)
 	}
 	defer rows.Close()
 
-	// The month of the message decides its partition, and the partitions of
-	// the months around this one are created by the migration.
-	partition := "messages_" + sentAt.Format("200601")
+	// The time of the message decides its partition. The partitions around
+	// the present are created by the migrations.
+	partition := partitionHolding(t, NewPartitions(repo.pool), sentAt)
 
 	var read int
 	for rows.Next() {

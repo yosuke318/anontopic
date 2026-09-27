@@ -153,7 +153,8 @@ func (r *PostgresRepository) Flag(ctx context.Context, conversationID, reporterT
 }
 
 // Transcript reads one conversation, the participants it was formed for and
-// every message recorded in it.
+// every message recorded in it. The messages of a reported conversation whose
+// partition has been dropped are read from retained_messages.
 func (r *PostgresRepository) Transcript(ctx context.Context, id string) (Transcript, error) {
 	conv, err := r.Conversation(ctx, id)
 	if err != nil {
@@ -173,15 +174,18 @@ func (r *PostgresRepository) Transcript(ctx context.Context, id string) (Transcr
 	}
 
 	rows, err := r.pool.Query(ctx,
-		"SELECT sender_token, body, moderation_flag, created_at FROM messages "+
-			"WHERE conversation_id = $1 ORDER BY created_at, id", id)
+		"SELECT id, sender_token, body, moderation_flag, created_at FROM messages WHERE conversation_id = $1 "+
+			"UNION ALL "+
+			"SELECT id, sender_token, body, moderation_flag, created_at FROM retained_messages WHERE conversation_id = $1 "+
+			"ORDER BY created_at, id", id)
 	if err != nil {
 		return Transcript{}, fmt.Errorf("select messages: %w", err)
 	}
 
 	tr.Messages, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (Message, error) {
+		var messageID int64
 		msg := Message{ConversationID: id}
-		if err := row.Scan(&msg.SenderToken, &msg.Body, &msg.Flag, &msg.CreatedAt); err != nil {
+		if err := row.Scan(&messageID, &msg.SenderToken, &msg.Body, &msg.Flag, &msg.CreatedAt); err != nil {
 			return Message{}, err
 		}
 		msg.CreatedAt = msg.CreatedAt.UTC()
