@@ -92,6 +92,20 @@ make infra-check              # fmt の検査と validate（AWS の認証情報�
 make infra-plan INFRA_ENV=dev  # リモートの state に対して plan を取る
 ```
 
+## ネットワーク
+
+プライベートサブネットからの外向き通信は、パブリックサブネットの NAT インスタンス 1 台を通る
+（ADR-0028）。SSH は開けていないため、入るときは Session Manager を使う。
+
+AMI は作成時のものに固定している。OS を更新するときは入れ替える。入れ替えの間は
+プライベートサブネットから外に出られない。
+
+```bash
+terraform -chdir=infra/environments/dev apply -replace=module.network.aws_instance.nat
+```
+
+## プロバイダのバージョン
+
 プロバイダのバージョンは各ルートモジュールの `.terraform.lock.hcl` で固定している。
 上げるときは lock ファイルも作り直してコミットする。
 
