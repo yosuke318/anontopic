@@ -64,6 +64,7 @@ terraform apply
 | --- | --- |
 | `AWS_ACCOUNT_ID` | AWS アカウント ID |
 | `TF_STATE_BUCKET` | bootstrap の出力 `state_bucket_name` |
+| `ALARM_EMAIL` | アラームと予算の通知を受け取るメールアドレス（prod の `alarm_email` と同じ値） |
 
 ドメインを取得したら、同じ画面の Variables に `DOMAIN_NAME`（Route 53 のホストゾーン名）を
 登録する。未登録の間、CI の plan は証明書・DNS レコード・HTTPS リスナーを作らない構成で取る。
@@ -233,6 +234,35 @@ aws ssm put-parameter --type SecureString --overwrite \
   --name /anontopic/dev/api/REDIS_URL \
   --value "rediss://$($tf output -raw redis_address):6379"
 ```
+
+## 監視と予算
+
+インフラのアラームと AWS Budgets の予算は prod にだけ置き、通知は SNS トピック
+`anontopic-prod-alerts` からメールで届ける（ADR-0002、ADR-0033）。dev には置かない。
+
+通知先のアドレスは prod の `terraform.tfvars` の `alarm_email` に書く。CI の plan と揃えるため、
+GitHub のシークレット `ALARM_EMAIL` にも同じ値を登録する。初回の apply の後に AWS から届く
+確認メールのリンクを開くまで、通知は届かない。
+
+| アラーム | 条件 |
+| --- | --- |
+| `anontopic-prod-api-cpu` | API のサービスの CPU 使用率の平均が 80% を 15 分超える |
+| `anontopic-prod-api-memory` | API のサービスのメモリ使用率の最大が 85% を超える |
+| `anontopic-prod-api-unhealthy-targets` | ヘルスチェックに失敗しているタスクが 3 分続けてある |
+| `anontopic-prod-api-5xx` | ALB とタスクの 5xx が 5 分間で 10 件を超える |
+| `anontopic-prod-db-cpu` | RDS の CPU 使用率の平均が 80% を 15 分超える |
+| `anontopic-prod-db-connections` | RDS への接続数が 50 を超える |
+| `anontopic-prod-redis-memory` | Redis のメモリ使用率が 80% を超える |
+| `anontopic-prod-nat-status-check` | NAT インスタンスのステータスチェックが 2 分続けて失敗する |
+
+ALB の 2 つは `domain_name` を設定してサービスが ALB につながってから作られる。
+
+予算 `anontopic-account-monthly` はアカウント全体（dev と state バケットを含む）の月額を見て、
+実際の費用が $270 の 50% / 80% / 100% を超えたら通知する。費用のデータは 1 日に数回しか
+更新されないため、通知は数時間遅れることがある。超えてもサービスは自動では止まらない。
+
+RDS の Database Insights は Standard モードの 7 日保持で、費用はかからない。CloudWatch の
+コンソールの Database Insights から、SQL ごとの負荷を見られる。
 
 ## プロバイダのバージョン
 

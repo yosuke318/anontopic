@@ -59,3 +59,24 @@ module "cache" {
 
   node_type = "cache.t4g.micro"
 }
+
+# dev は追加開発のときだけ動かすため、アラームと予算は prod にだけ置く。
+module "monitoring" {
+  source = "../../modules/monitoring"
+
+  name_prefix = "${local.project}-${local.env}"
+  alarm_email = local.alarm_email
+
+  # 予算はアカウント全体（dev を含む）の費用を見る。月 4 万円前後を USD に直した値。
+  budget_name        = "${local.project}-account-monthly"
+  monthly_budget_usd = 270
+
+  ecs_cluster_name        = module.compute.cluster_name
+  ecs_service_name        = module.compute.service_name
+  load_balancer_attached  = module.compute.load_balancer_attached
+  alb_arn_suffix          = module.compute.alb_arn_suffix
+  target_group_arn_suffix = module.compute.target_group_arn_suffix
+  db_instance_identifier  = module.database.identifier
+  redis_cluster_id        = module.cache.cluster_id
+  nat_instance_id         = module.network.nat_instance_id
+}
