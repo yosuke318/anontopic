@@ -4,6 +4,8 @@ resource "aws_ecr_repository" "api" {
   # 同じタグで別のイメージを上書きできないようにし、タグからイメージを一意に引けるようにする。
   image_tag_mutability = "IMMUTABLE"
 
+  force_delete = var.ecr_force_delete
+
   image_scanning_configuration {
     scan_on_push = true
   }

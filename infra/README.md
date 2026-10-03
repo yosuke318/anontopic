@@ -96,6 +96,14 @@ make infra-check              # fmt の検査と validate（AWS の認証情報�
 make infra-plan INFRA_ENV=dev  # リモートの state に対して plan を取る
 ```
 
+dev は追加開発のときだけ作り、使い終わったら destroy する。dev の ECR リポジトリは
+イメージが残っていても削除できる。作り直したときは、下の「アプリの実行環境」の初回の構築と
+「アプリのロールを作る」をやり直す。
+
+```bash
+terraform -chdir=infra/environments/dev destroy
+```
+
 ## ネットワーク
 
 プライベートサブネットからの外向き通信は、パブリックサブネットの NAT インスタンス 1 台を通る

@@ -19,8 +19,11 @@ module "compute" {
   app_port              = local.app_port
 
   desired_count = 1
-  cpu           = 256
-  memory        = 512
+
+  # dev は追加開発のときだけ作り、普段は destroy しておく。
+  ecr_force_delete = true
+  cpu              = 256
+  memory           = 512
 
   environment = local.domain_name == null ? {} : {
     APP_ALLOWED_ORIGINS = "https://dev.${local.domain_name}"
