@@ -1,4 +1,5 @@
-# 通信を許すのは インターネット → ALB → アプリ → RDS / ElastiCache の向きだけにする。
+# 通信を許すのは インターネット → ALB → アプリ → RDS / ElastiCache の向きと、
+# 運用者が NAT インスタンスを経由して RDS に入る向きだけにする。
 # RDS と ElastiCache のグループは外向きのルールを持たない。
 
 resource "aws_security_group" "alb" {
@@ -109,6 +110,17 @@ resource "aws_vpc_security_group_ingress_rule" "database_from_app" {
   from_port                    = 5432
   to_port                      = 5432
   referenced_security_group_id = aws_security_group.app.id
+}
+
+# 運用者は NAT インスタンスへの Session Manager のポートフォワードで RDS に入り、
+# ロールの作成やマイグレーションを行う（ADR-0032）。
+resource "aws_vpc_security_group_ingress_rule" "database_from_nat" {
+  security_group_id            = aws_security_group.database.id
+  description                  = "PostgreSQL from operators through the NAT instance"
+  ip_protocol                  = "tcp"
+  from_port                    = 5432
+  to_port                      = 5432
+  referenced_security_group_id = aws_security_group.nat.id
 }
 
 resource "aws_vpc_security_group_ingress_rule" "cache_from_app" {

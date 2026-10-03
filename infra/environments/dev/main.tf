@@ -19,8 +19,11 @@ module "compute" {
   app_port              = local.app_port
 
   desired_count = 1
-  cpu           = 256
-  memory        = 512
+
+  # dev は追加開発のときだけ作り、普段は destroy しておく。
+  ecr_force_delete = true
+  cpu              = 256
+  memory           = 512
 
   environment = local.domain_name == null ? {} : {
     APP_ALLOWED_ORIGINS = "https://dev.${local.domain_name}"
@@ -36,4 +39,26 @@ module "compute" {
 
   zone_name       = local.domain_name
   api_record_name = "api.dev"
+}
+
+module "database" {
+  source = "../../modules/database"
+
+  name_prefix       = "${local.project}-${local.env}"
+  subnet_ids        = module.network.private_subnet_ids
+  security_group_id = module.network.database_security_group_id
+
+  instance_class        = "db.t4g.micro"
+  max_allocated_storage = 50
+  backup_retention_days = 1
+}
+
+module "cache" {
+  source = "../../modules/cache"
+
+  name_prefix       = "${local.project}-${local.env}"
+  subnet_ids        = module.network.private_subnet_ids
+  security_group_id = module.network.cache_security_group_id
+
+  node_type = "cache.t4g.micro"
 }

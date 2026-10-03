@@ -14,7 +14,7 @@ variable "vpc_cidr" {
 }
 
 variable "availability_zones" {
-  description = "サブネットを置くアベイラビリティゾーン。RDS の Multi-AZ と ALB のため 2 つ以上を指定する。"
+  description = "サブネットを置くアベイラビリティゾーン。ALB と RDS のサブネットグループが 2 つ以上の AZ を求めるため、2 つ以上を指定する。"
   type        = list(string)
 
   validation {

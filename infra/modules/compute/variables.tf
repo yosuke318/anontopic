@@ -81,6 +81,12 @@ variable "secret_names" {
   default     = []
 }
 
+variable "ecr_force_delete" {
+  description = "true のとき、イメージが残っていても ECR リポジトリを削除できる。普段は destroy しておく環境で使う。"
+  type        = bool
+  default     = false
+}
+
 variable "log_retention_days" {
   description = "コンテナのログを CloudWatch Logs に残す日数。"
   type        = number
