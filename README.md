@@ -364,6 +364,10 @@ APIサーバーの設定は環境変数で行う。
 
 - マイグレーションは `db/migrations/`。`cmd/migrate` がembedして適用する。
   `go run ./cmd/migrate down` で1つ戻せる。
+- 本番ではデプロイがサービスを切り替える前にマイグレーションを流し、ロールバックでは戻さない。
+  そのため変更は後方互換のあるものに限り、列やテーブルの削除・改名は、それを使わないコードを
+  先にデプロイしてから別のマイグレーションで行う。手順は [infra/README.md](infra/README.md) の「デプロイ」、
+  理由は [ADR-0034](docs/adr/0034-deploy-from-github-actions-and-migrate-in-a-one-off-ecs-task.md)。
 - シードは `db/seeds/`。`base/` は全環境、`dev/` は `APP_ENV=production` 以外でのみ入る。
   `dev/` には通報済みの会話や90日を超えた会話が含まれ、通報一覧や削除バッチの確認に使う。
 - `messages` は UTC の 0 時で区切る日次パーティション。マイグレーションが今日から 14 日先までを作り、

@@ -1,0 +1,64 @@
+# main の Terraform を 1 つの環境に apply する。手動で実行する。
+#
+# 差分の中身は公開ログに出さないため、PR の段階で手元の make infra-plan で確かめておく。
+# ここでは plan の件数を出してから、その plan をそのまま apply する。prod は Environment の
+# 承認を待ってから動く。
+name: インフラ apply
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: apply する環境
+        type: choice
+        options: [dev, prod]
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  TERRAFORM_VERSION: "1.15.8"
+
+jobs:
+  apply:
+    name: apply (${{ inputs.environment }})
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    concurrency:
+      group: infra-${{ inputs.environment }}
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: infra/environments/${{ inputs.environment }}
+    env:
+      TF_VAR_aws_account_id: ${{ secrets.AWS_ACCOUNT_ID }}
+      TF_VAR_domain_name: ${{ vars.DOMAIN_NAME }}
+      TF_VAR_alarm_email: ${{ secrets.ALARM_EMAIL }}
+      TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/anontopic-terraform-apply
+          aws-region: ap-northeast-1
+      - run: terraform init -input=false -lockfile=readonly -backend-config="bucket=$TF_STATE_BUCKET"
+      # 公開リポジトリの Actions のログは誰でも読める。件数とエラーの見出しの行だけを出す。
+      - name: terraform plan
+        run: |
+          status=0
+          terraform plan -input=false -no-color -lock-timeout=60s -out=tfplan > plan.txt 2>&1 || status=$?
+          grep -E '^(Plan:|No changes\.|(│ )?Error:)' plan.txt || true
+          exit "$status"
+      - name: terraform apply
+        run: |
+          status=0
+          terraform apply -input=false -no-color -lock-timeout=60s tfplan > apply.txt 2>&1 || status=$?
+          grep -E '^(Apply complete!|(│ )?Error:)' apply.txt || true
+          exit "$status"
