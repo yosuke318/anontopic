@@ -73,9 +73,14 @@ terraform apply
 CI の `インフラ plan` ジョブは `anontopic-terraform-plan` ロールを OIDC で引き受けて、
 dev と prod の plan を取る。ログには件数の行だけを出す。
 
-`anontopic-terraform-apply` ロールは、GitHub の Environment `dev` / `prod` を指定したジョブから
-だけ引き受けられる。apply のワークフローを足すときは、Environment の保護ルールで
-デプロイできるブランチを `main` に絞り、prod には承認者を付ける。
+`anontopic-terraform-apply` ロールと `anontopic-deploy` ロールは、GitHub の Environment
+`dev` / `prod` を指定したジョブからだけ引き受けられる。Settings → Environments で 2 つを作り、
+保護ルールを付ける。
+
+| Environment | Deployment branches | Required reviewers |
+| --- | --- | --- |
+| `dev` | `main` だけ | なし |
+| `prod` | `main` だけ | 運用者 |
 
 ### 3. 各環境を初期化する
 
@@ -160,9 +165,56 @@ docker buildx build --platform linux/arm64 --provenance=false --push \
 terraform -chdir=infra/environments/dev apply
 ```
 
-ECR のタグは上書きできない。2 回目以降のデプロイは別のタグでイメージを入れ、タスク定義の
-新しいリビジョンを登録してサービスを更新する。Terraform はサービスが使うリビジョンを追わないため、
-Terraform でタスク定義を変えたときも、次のデプロイまで動いているタスクには反映されない。
+2 回目以降は下の「デプロイ」の流れで入れ替える。Terraform はサービスが使うリビジョンを
+追わないため、Terraform でタスク定義を変えたときも、次のデプロイまで動いているタスクには
+反映されない。
+
+### デプロイ
+
+main の CI が通ると、GitHub Actions の `Deploy` ワークフローが動く（ADR-0034）。
+
+1. イメージを 1 回だけビルドする。タグはコミットの SHA。
+2. dev が作られていれば、ECR に入れてマイグレーションを流し、サービスを切り替える。
+   作られていなければ飛ばす。
+3. prod は Environment の承認を待ってから、同じイメージで 2 と同じことをする。
+
+マイグレーションは、新しいイメージのタスク定義でコマンドを `/migrate up` に替えた ECS タスクを
+1 回動かして流す。失敗するとサービスは切り替えない。ログは CloudWatch Logs の
+`/ecs/anontopic-<env>-api` にあり、Actions のログにはタスクの ID だけが出る。
+
+マイグレーションは後方互換のある変更に限る。デプロイの途中とロールバックの後は、古いイメージが
+新しいスキーマで動く。列やテーブルの削除・改名は、それを使わないコードを先にデプロイしてから、
+別のマイグレーションで行う。
+
+デプロイのたびに、ファミリーの最新のタスク定義のイメージだけを差し替えた新しいリビジョンを
+登録する。Terraform で変えた環境変数や秘密は、次のデプロイで取り込まれる。
+
+### ロールバック
+
+Actions の `Deploy` ワークフローを手動で実行し、環境と戻す先のイメージのタグを指定する。
+タグはコミットの SHA を 40 文字で渡す。ECR には直近の 30 個のイメージが残っている。
+
+```bash
+git rev-parse <戻す先のコミット>
+```
+
+マイグレーションは戻さない。新しいスキーマのまま、古いイメージが動く。
+
+手元から入れ替えるときは `scripts/deploy.sh` を使う（`jq` が要る）。
+
+```bash
+arn="$(scripts/deploy.sh register prod <タグ>)"
+scripts/deploy.sh update prod "$arn"
+```
+
+### Terraform の apply
+
+PR で手元の `make infra-plan` の差分を確かめ、main にマージしてから、Actions の
+`インフラ apply` ワークフローを手動で実行する。plan を取ってその plan をそのまま apply し、
+ログには件数とエラーの見出しだけを出す。prod は Environment の承認を待つ。
+
+環境を一から作るときは ECR とイメージを先に用意する必要があるため、上の「初回の構築」を
+手元で行う。
 
 ### WebSocket の接続
 
