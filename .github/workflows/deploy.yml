@@ -57,7 +57,7 @@ jobs:
         with:
           name: api-image
           path: api-image.tar
-          retention-days: 1
+          retention-days: 7
 
   dev:
     needs: build
