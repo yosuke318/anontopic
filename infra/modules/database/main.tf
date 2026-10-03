@@ -73,6 +73,12 @@ resource "aws_db_instance" "this" {
   auto_minor_version_upgrade      = true
   enabled_cloudwatch_logs_exports = ["postgresql"]
 
+  # Database Insights は Standard モードの 7 日保持なら無料で、SQL ごとの負荷を見られる。
+  # Advanced モードは vCPU 時間で課金されるため、モードを明示する。
+  database_insights_mode                = "standard"
+  performance_insights_enabled          = true
+  performance_insights_retention_period = 7
+
   # 消えても作り直せばよい前提で、削除の保護と最後のスナップショットは付けない。
   deletion_protection      = false
   skip_final_snapshot      = true

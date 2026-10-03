@@ -13,3 +13,9 @@ variable "domain_name" {
   type        = string
   default     = null
 }
+
+variable "alarm_email" {
+  description = "アラームと予算の通知を受け取るメールアドレス。null か空文字のときは通知先を登録しない。"
+  type        = string
+  default     = null
+}

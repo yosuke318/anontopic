@@ -33,3 +33,7 @@ output "database_master_user_secret_arn" {
 output "redis_address" {
   value = module.cache.address
 }
+
+output "alerts_topic_arn" {
+  value = module.monitoring.alerts_topic_arn
+}
