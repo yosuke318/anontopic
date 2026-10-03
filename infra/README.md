@@ -167,6 +167,65 @@ Terraform でタスク定義を変えたときも、次のデプロイまで動�
 残った WebSocket が切れる。ブラウザはつなぎ直し、`CHAT_REJOIN_GRACE` の間に戻れば会話は続く。
 SIGTERM は登録解除の後に届き、サーバーは書き込み待ちのメッセージを記録してから終わる。
 
+## データベースとキャッシュ
+
+RDS PostgreSQL と ElastiCache Redis は、どちらも Single-AZ の 1 台で動かす（ADR-0031）。
+インスタンスやその AZ が止まると、立て直すまでサービスも止まる。
+
+| | dev | prod |
+| --- | --- | --- |
+| RDS | `db.t4g.micro`、ストレージ上限 50 GiB、バックアップ 1 日 | `db.t4g.small`、ストレージ上限 300 GiB、バックアップ 7 日 |
+| Redis | `cache.t4g.micro` | `cache.t4g.micro` |
+
+どちらも接続は TLS に限る。`DATABASE_URL` には `sslmode=require` を付け、`REDIS_URL` は
+`rediss://` で始める。
+
+### アプリのロールを作る
+
+マスターユーザーのパスワードは RDS が Secrets Manager に持ち、定期的にローテーションされる。
+アプリはマスターユーザーを使わず、運用者が作るロール `anontopic_app` で接続する（ADR-0032）。
+RDS はプライベートサブネットにあるため、NAT インスタンスへの Session Manager の
+ポートフォワードで入る。手元に Session Manager プラグインが要る。
+
+```bash
+tf="terraform -chdir=infra/environments/dev"
+
+aws ssm start-session --target "$($tf output -raw nat_instance_id)" \
+  --document-name AWS-StartPortForwardingSessionToRemoteHost \
+  --parameters "host=$($tf output -raw database_address),portNumber=5432,localPortNumber=15432"
+```
+
+別のターミナルで、マスターユーザーとしてロールを作り、データベースの所有者にする。
+
+```bash
+tf="terraform -chdir=infra/environments/dev"
+master_password="$(aws secretsmanager get-secret-value \
+  --secret-id "$($tf output -raw database_master_user_secret_arn)" \
+  --query SecretString --output text | jq -r .password)"
+app_password="$(openssl rand -hex 32)"
+
+PGPASSWORD="$master_password" psql "host=localhost port=15432 dbname=anontopic user=anontopic_admin sslmode=require" <<SQL
+CREATE ROLE anontopic_app LOGIN PASSWORD '$app_password';
+GRANT anontopic_app TO CURRENT_USER;
+ALTER DATABASE anontopic OWNER TO anontopic_app;
+SQL
+```
+
+同じシェルで、アプリのロールでマイグレーションを流し、接続 URL を SSM に入れる。
+
+```bash
+DATABASE_URL="postgres://anontopic_app:$app_password@localhost:15432/anontopic?sslmode=require" \
+  go run ./cmd/migrate up
+
+aws ssm put-parameter --type SecureString --overwrite \
+  --name /anontopic/dev/api/DATABASE_URL \
+  --value "postgres://anontopic_app:$app_password@$($tf output -raw database_address):5432/anontopic?sslmode=require"
+
+aws ssm put-parameter --type SecureString --overwrite \
+  --name /anontopic/dev/api/REDIS_URL \
+  --value "rediss://$($tf output -raw redis_address):6379"
+```
+
 ## プロバイダのバージョン
 
 プロバイダのバージョンは各ルートモジュールの `.terraform.lock.hcl` で固定している。

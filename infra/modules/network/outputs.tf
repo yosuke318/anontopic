@@ -25,3 +25,8 @@ output "database_security_group_id" {
 output "cache_security_group_id" {
   value = aws_security_group.cache.id
 }
+
+output "nat_instance_id" {
+  description = "NAT インスタンスの ID。運用者が Session Manager のポートフォワードで RDS に入るときの経由先になる。"
+  value       = aws_instance.nat.id
+}
