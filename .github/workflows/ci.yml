@@ -134,8 +134,10 @@ jobs:
       run:
         working-directory: infra/environments/${{ matrix.env }}
     # アカウント ID とバケット名はシークレットに置き、ログ上では伏せ字にする。
+    # ドメインは変数に置く。未登録のときは空文字になり、証明書・DNS レコード・HTTPS リスナーを作らない plan になる。
     env:
       TF_VAR_aws_account_id: ${{ secrets.AWS_ACCOUNT_ID }}
+      TF_VAR_domain_name: ${{ vars.DOMAIN_NAME }}
       TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
     steps:
       - uses: actions/checkout@v4
