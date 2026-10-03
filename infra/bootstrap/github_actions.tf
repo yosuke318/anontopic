@@ -60,9 +60,9 @@ resource "aws_iam_role_policy" "terraform_plan_state_lock" {
   policy = data.aws_iam_policy_document.terraform_plan_state_lock.json
 }
 
-# apply 用。GitHub の Environment（dev / prod）を指定したジョブからだけ引き受けられる。
-# どのブランチから、誰の承認で apply できるかは Environment の保護ルールで絞る。
-data "aws_iam_policy_document" "terraform_apply_trust" {
+# GitHub の Environment（dev / prod）を指定したジョブからだけ引き受けられる。apply とデプロイの
+# ロールが使う。どのブランチから、誰の承認で実行できるかは Environment の保護ルールで絞る。
+data "aws_iam_policy_document" "github_environment_trust" {
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]
 
@@ -92,7 +92,7 @@ data "aws_iam_policy_document" "terraform_apply_trust" {
 
 resource "aws_iam_role" "terraform_apply" {
   name                 = "${local.project}-terraform-apply"
-  assume_role_policy   = data.aws_iam_policy_document.terraform_apply_trust.json
+  assume_role_policy   = data.aws_iam_policy_document.github_environment_trust.json
   max_session_duration = 3600
 }
 

@@ -1,0 +1,106 @@
+# 1 つの環境に API をデプロイする。deploy.yml から呼ぶ。
+#
+# イメージを ECR に入れ、タスク定義の新しいリビジョンを登録し、マイグレーションを流してから
+# サービスを切り替える。マイグレーションは後方互換のある変更に限る（ADR-0034）。
+name: Deploy environment
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: dev か prod
+        type: string
+        required: true
+      ref:
+        description: scripts/deploy.sh を取り出すコミット
+        type: string
+        required: true
+      image_tag:
+        description: デプロイするイメージのタグ（コミットの SHA）
+        type: string
+        required: true
+      push_image:
+        description: true のとき、ビルドしたイメージを成果物から取り出して ECR に入れる
+        type: boolean
+        default: false
+      migrate:
+        description: true のとき、サービスを切り替える前にマイグレーションを流す
+        type: boolean
+        default: false
+      skip_if_absent:
+        description: true のとき、環境が作られていなければ何もせずに終わる
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    name: デプロイ (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    # 同じ環境へのデプロイは 1 つずつ流す。動いているデプロイは止めず、待っているものは
+    # 新しいものに置き換わる。
+    concurrency:
+      group: deploy-${{ inputs.environment }}
+      cancel-in-progress: false
+    env:
+      DEPLOY_ENV: ${{ inputs.environment }}
+      IMAGE_TAG: ${{ inputs.image_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/anontopic-deploy
+          aws-region: ap-northeast-1
+
+      - name: 環境があるか確かめる
+        id: target
+        run: |
+          if scripts/deploy.sh present "$DEPLOY_ENV"; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          elif [ "${{ inputs.skip_if_absent }}" = true ]; then
+            echo "::notice::$DEPLOY_ENV は作られていないため、デプロイを飛ばした。"
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::$DEPLOY_ENV の ECS サービスが無い。"
+            exit 1
+          fi
+
+      - name: イメージを取り出す
+        if: steps.target.outputs.present == 'true' && inputs.push_image
+        uses: actions/download-artifact@v4
+        with:
+          name: api-image
+      - name: ECR にログインする
+        if: steps.target.outputs.present == 'true' && inputs.push_image
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      # ECR のタグは上書きできない。同じコミットを再実行したときは入っているものを使う。
+      - name: イメージを ECR に入れる
+        if: steps.target.outputs.present == 'true' && inputs.push_image
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          if scripts/deploy.sh has-image "$DEPLOY_ENV" "$IMAGE_TAG"; then
+            echo "タグ $IMAGE_TAG のイメージは入っている。"
+            exit 0
+          fi
+          docker load --input api-image.tar
+          docker tag "anontopic-api:$IMAGE_TAG" "$REGISTRY/anontopic-$DEPLOY_ENV-api:$IMAGE_TAG"
+          docker push --quiet "$REGISTRY/anontopic-$DEPLOY_ENV-api:$IMAGE_TAG"
+
+      - name: タスク定義を登録する
+        if: steps.target.outputs.present == 'true'
+        id: register
+        run: echo "arn=$(scripts/deploy.sh register "$DEPLOY_ENV" "$IMAGE_TAG")" >> "$GITHUB_OUTPUT"
+      - name: マイグレーションを流す
+        if: steps.target.outputs.present == 'true' && inputs.migrate
+        run: scripts/deploy.sh migrate "$DEPLOY_ENV" "${{ steps.register.outputs.arn }}"
+      - name: サービスを切り替える
+        if: steps.target.outputs.present == 'true'
+        run: scripts/deploy.sh update "$DEPLOY_ENV" "${{ steps.register.outputs.arn }}"
