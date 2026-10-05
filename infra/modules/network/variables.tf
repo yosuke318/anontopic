@@ -29,6 +29,12 @@ variable "app_port" {
   default     = 8080
 }
 
+variable "web_port" {
+  description = "フロントエンドのコンテナが待ち受けるポート。ALB からの転送先になる。"
+  type        = number
+  default     = 3000
+}
+
 variable "nat_instance_type" {
   description = "NAT インスタンスのインスタンスタイプ。AMI が arm64 のため Graviton のタイプを指定する。"
   type        = string

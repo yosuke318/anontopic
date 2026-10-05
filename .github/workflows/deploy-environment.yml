@@ -1,7 +1,8 @@
-# 1 つの環境に API をデプロイする。deploy.yml から呼ぶ。
+# 1 つの環境に API とフロントエンドをデプロイする。deploy.yml から呼ぶ。
 #
-# イメージを ECR に入れ、タスク定義の新しいリビジョンを登録し、マイグレーションを流してから
+# API はイメージを ECR に入れ、タスク定義の新しいリビジョンを登録し、マイグレーションを流してから
 # サービスを切り替える。マイグレーションは後方互換のある変更に限る（ADR-0034）。
+# フロントエンドは API の切り替えが終わってから、同じ手順でマイグレーションを除いて入れ替える。
 name: Deploy environment
 
 on:
@@ -20,7 +21,7 @@ on:
         type: string
         required: true
       push_image:
-        description: true のとき、ビルドしたイメージを成果物から取り出して ECR に入れる
+        description: true のとき、ビルドしたイメージ（API とフロントエンド）を成果物から取り出して ECR に入れる
         type: boolean
         default: false
       migrate:
@@ -61,7 +62,7 @@ jobs:
       - name: 環境があるか確かめる
         id: target
         run: |
-          if scripts/deploy.sh present "$DEPLOY_ENV"; then
+          if scripts/deploy.sh present "$DEPLOY_ENV" api; then
             echo "present=true" >> "$GITHUB_OUTPUT"
           elif [ "${{ inputs.skip_if_absent }}" = true ]; then
             echo "::notice::$DEPLOY_ENV は作られていないため、デプロイを飛ばした。"
@@ -86,7 +87,7 @@ jobs:
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
         run: |
-          if scripts/deploy.sh has-image "$DEPLOY_ENV" "$IMAGE_TAG"; then
+          if scripts/deploy.sh has-image "$DEPLOY_ENV" api "$IMAGE_TAG"; then
             echo "タグ $IMAGE_TAG のイメージは入っている。"
             exit 0
           fi
@@ -97,10 +98,50 @@ jobs:
       - name: タスク定義を登録する
         if: steps.target.outputs.present == 'true'
         id: register
-        run: echo "arn=$(scripts/deploy.sh register "$DEPLOY_ENV" "$IMAGE_TAG")" >> "$GITHUB_OUTPUT"
+        run: echo "arn=$(scripts/deploy.sh register "$DEPLOY_ENV" api "$IMAGE_TAG")" >> "$GITHUB_OUTPUT"
       - name: マイグレーションを流す
         if: steps.target.outputs.present == 'true' && inputs.migrate
         run: scripts/deploy.sh migrate "$DEPLOY_ENV" "${{ steps.register.outputs.arn }}"
       - name: サービスを切り替える
         if: steps.target.outputs.present == 'true'
-        run: scripts/deploy.sh update "$DEPLOY_ENV" "${{ steps.register.outputs.arn }}"
+        run: scripts/deploy.sh update "$DEPLOY_ENV" api "${{ steps.register.outputs.arn }}"
+
+      # フロントエンドはドメインを設定した環境にだけある。ロールバックで戻す先のタグがフロントエンドを
+      # 入れる前のコミットのときは、ECR にイメージが無いため今のものを残す。
+      - name: フロントエンドがあるか確かめる
+        if: steps.target.outputs.present == 'true'
+        id: web
+        run: |
+          if ! scripts/deploy.sh present "$DEPLOY_ENV" web; then
+            echo "::notice::$DEPLOY_ENV のフロントエンドは作られていないため、デプロイを飛ばした。"
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          elif [ "${{ inputs.push_image }}" != true ] && ! scripts/deploy.sh has-image "$DEPLOY_ENV" web "$IMAGE_TAG"; then
+            echo "::warning::ECR にタグ $IMAGE_TAG のフロントエンドのイメージが無いため、フロントエンドは入れ替えなかった。"
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: フロントエンドのイメージを取り出す
+        if: steps.web.outputs.present == 'true' && inputs.push_image
+        uses: actions/download-artifact@v4
+        with:
+          name: web-image-${{ inputs.environment }}
+      - name: フロントエンドのイメージを ECR に入れる
+        if: steps.web.outputs.present == 'true' && inputs.push_image
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          if scripts/deploy.sh has-image "$DEPLOY_ENV" web "$IMAGE_TAG"; then
+            echo "タグ $IMAGE_TAG のイメージは入っている。"
+            exit 0
+          fi
+          docker load --input web-image.tar
+          docker tag "anontopic-web:$IMAGE_TAG" "$REGISTRY/anontopic-$DEPLOY_ENV-web:$IMAGE_TAG"
+          docker push --quiet "$REGISTRY/anontopic-$DEPLOY_ENV-web:$IMAGE_TAG"
+      - name: フロントエンドのタスク定義を登録する
+        if: steps.web.outputs.present == 'true'
+        id: register_web
+        run: echo "arn=$(scripts/deploy.sh register "$DEPLOY_ENV" web "$IMAGE_TAG")" >> "$GITHUB_OUTPUT"
+      - name: フロントエンドのサービスを切り替える
+        if: steps.web.outputs.present == 'true'
+        run: scripts/deploy.sh update "$DEPLOY_ENV" web "${{ steps.register_web.outputs.arn }}"

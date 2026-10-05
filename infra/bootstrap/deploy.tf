@@ -6,6 +6,10 @@ locals {
     ecs = "arn:aws:ecs:${local.region}:${var.aws_account_id}"
     iam = "arn:aws:iam::${var.aws_account_id}"
   }
+
+  # ECS で動かすアプリ。ECR リポジトリ・タスク定義・サービス・実行ロールの名前の末尾になる。
+  # マイグレーションのタスクを動かせるのは api だけにする。
+  deploy_apps = ["api", "web"]
 }
 
 resource "aws_iam_role" "deploy" {
@@ -33,7 +37,7 @@ data "aws_iam_policy_document" "deploy" {
       "ecr:PutImage",
       "ecr:UploadLayerPart",
     ]
-    resources = ["${local.arn_prefix.ecr}:repository/${local.project}-*-api"]
+    resources = [for app in local.deploy_apps : "${local.arn_prefix.ecr}:repository/${local.project}-*-${app}"]
   }
 
   # タスク定義の読み出しと登録は、リソースで絞れない。
@@ -46,7 +50,7 @@ data "aws_iam_policy_document" "deploy" {
   statement {
     sid       = "TagTaskDefinitions"
     actions   = ["ecs:TagResource"]
-    resources = ["${local.arn_prefix.ecs}:task-definition/${local.project}-*-api:*"]
+    resources = [for app in local.deploy_apps : "${local.arn_prefix.ecs}:task-definition/${local.project}-*-${app}:*"]
 
     condition {
       test     = "StringEquals"
@@ -58,7 +62,7 @@ data "aws_iam_policy_document" "deploy" {
   statement {
     sid       = "Services"
     actions   = ["ecs:DescribeServices", "ecs:UpdateService"]
-    resources = ["${local.arn_prefix.ecs}:service/${local.project}-*/${local.project}-*-api"]
+    resources = [for app in local.deploy_apps : "${local.arn_prefix.ecs}:service/${local.project}-*/${local.project}-*-${app}"]
   }
 
   statement {
@@ -89,7 +93,7 @@ data "aws_iam_policy_document" "deploy" {
   statement {
     sid       = "PassExecutionRole"
     actions   = ["iam:PassRole"]
-    resources = ["${local.arn_prefix.iam}:role/${local.project}-*-api-execution"]
+    resources = [for app in local.deploy_apps : "${local.arn_prefix.iam}:role/${local.project}-*-${app}-execution"]
 
     condition {
       test     = "StringEquals"

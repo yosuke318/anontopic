@@ -51,8 +51,26 @@ variable "alb_arn_suffix" {
 }
 
 variable "target_group_arn_suffix" {
-  description = "ターゲットグループの ARN の末尾（CloudWatch のディメンション TargetGroup の値）。"
+  description = "API のターゲットグループの ARN の末尾（CloudWatch のディメンション TargetGroup の値）。"
   type        = string
+}
+
+variable "web_attached" {
+  description = "フロントエンドのサービスがあるか。false のときはフロントエンドのアラームを作らない。"
+  type        = bool
+  default     = false
+}
+
+variable "web_service_name" {
+  description = "フロントエンドの ECS サービスの名前。web_attached が false のときは null。"
+  type        = string
+  default     = null
+}
+
+variable "web_target_group_arn_suffix" {
+  description = "フロントエンドのターゲットグループの ARN の末尾。web_attached が false のときは null。"
+  type        = string
+  default     = null
 }
 
 variable "db_instance_identifier" {
@@ -73,19 +91,19 @@ variable "nat_instance_id" {
 # --- しきい値 ---
 
 variable "ecs_cpu_threshold" {
-  description = "API のサービスの CPU 使用率（%）の平均がこれを 15 分続けて超えたら通知する。"
+  description = "API とフロントエンドのサービスの CPU 使用率（%）の平均がこれを 15 分続けて超えたら通知する。"
   type        = number
   default     = 80
 }
 
 variable "ecs_memory_threshold" {
-  description = "API のサービスのメモリ使用率（%）の最大がこれを超えたら通知する。"
+  description = "API とフロントエンドのサービスのメモリ使用率（%）の最大がこれを超えたら通知する。"
   type        = number
   default     = 85
 }
 
 variable "alb_5xx_threshold" {
-  description = "ALB が返した 5xx とターゲットが返した 5xx の 5 分間の合計がこれを超えたら通知する。"
+  description = "5xx の 5 分間の件数がこれを超えたら通知する。API は ALB が返した分と API のタスクが返した分の合計、フロントエンドはタスクが返した分で数える。"
   type        = number
   default     = 10
 }

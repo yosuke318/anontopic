@@ -12,6 +12,7 @@ infra/
 └── modules/
     ├── network/
     ├── compute/
+    ├── web/
     ├── database/
     ├── cache/
     └── monitoring/
@@ -67,7 +68,8 @@ terraform apply
 | `ALARM_EMAIL` | アラームと予算の通知を受け取るメールアドレス（prod の `alarm_email` と同じ値） |
 
 ドメインを取得したら、同じ画面の Variables に `DOMAIN_NAME`（Route 53 のホストゾーン名）を
-登録する。未登録の間、CI の plan は証明書・DNS レコード・HTTPS リスナーを作らない構成で取る。
+登録する。未登録の間、CI の plan は証明書・DNS レコード・HTTPS リスナー・フロントエンドを
+作らない構成で取り、`Deploy` ワークフローはフロントエンドのビルドを飛ばす。
 ローカルの `terraform.tfvars` の `domain_name` と揃えないと、CI とローカルで plan が食い違う。
 
 CI の `インフラ plan` ジョブは `anontopic-terraform-plan` ロールを OIDC で引き受けて、
@@ -128,6 +130,10 @@ Go サーバーは ECS Fargate（ARM64）で動かし、ALB で HTTPS / WSS を�
 タスク数は固定で、prod は 2、dev は 1。API のドメインは prod が `api.<domain_name>`、
 dev が `api.dev.<domain_name>`。`domain_name` が未設定の間は ALB にリスナーが無く、外から届かない。
 
+Next.js のフロントエンドは同じクラスターで 1 タスク動かし、CloudFront から配る（ADR-0035）。
+サイトのドメインは prod が `<domain_name>`、dev が `dev.<domain_name>`。`domain_name` が
+未設定の間は、フロントエンドの環境も CloudFront も作らない。
+
 ホストゾーンはこの構成では作らない。ドメインを取得したときに作られたものを参照する。
 
 ### 秘密の環境変数
@@ -161,9 +167,31 @@ repo="$(terraform -chdir=infra/environments/dev output -raw ecr_repository_url)"
 aws ecr get-login-password | docker login --username AWS --password-stdin "${repo%%/*}"
 docker buildx build --platform linux/arm64 --provenance=false --push \
   -f docker/api.release.Dockerfile -t "$repo:initial" .
+```
 
+`domain_name` を設定している環境では、フロントエンドの ECR にもイメージを入れる。
+`NEXT_PUBLIC_` で始まる値はビルドのときに埋め込まれるため、環境のドメインを渡す。
+dev のサイトは `https://dev.<domain_name>`、API は `https://api.dev.<domain_name>`、
+prod はそれぞれ `https://<domain_name>` と `https://api.<domain_name>`。
+
+```bash
+terraform -chdir=infra/environments/dev apply -target='module.web[0].aws_ecr_repository.web'
+
+repo="$(terraform -chdir=infra/environments/dev output -raw web_ecr_repository_url)"
+docker buildx build --platform linux/arm64 --provenance=false --push \
+  --build-arg NEXT_PUBLIC_SITE_URL=https://dev.<domain_name> \
+  --build-arg NEXT_PUBLIC_API_BASE_URL=https://api.dev.<domain_name> \
+  -f docker/web.release.Dockerfile -t "$repo:initial" .
+```
+
+最後に残りを適用する。
+
+```bash
 terraform -chdir=infra/environments/dev apply
 ```
+
+すでに動いている環境に後から `domain_name` を設定したときも、フロントエンドの ECR と
+`initial` のイメージを先に用意してから全体を適用する。
 
 2 回目以降は下の「デプロイ」の流れで入れ替える。Terraform はサービスが使うリビジョンを
 追わないため、Terraform でタスク定義を変えたときも、次のデプロイまで動いているタスクには
@@ -173,10 +201,13 @@ terraform -chdir=infra/environments/dev apply
 
 main の CI が通ると、GitHub Actions の `Deploy` ワークフローが動く（ADR-0034）。
 
-1. イメージを 1 回だけビルドする。タグはコミットの SHA。
-2. dev が作られていれば、ECR に入れてマイグレーションを流し、サービスを切り替える。
-   作られていなければ飛ばす。
-3. prod は Environment の承認を待ってから、同じイメージで 2 と同じことをする。
+1. API のイメージを 1 回だけビルドする。フロントエンドのイメージは dev 用と prod 用を
+   それぞれビルドする（ADR-0035）。タグはどれもコミットの SHA。
+2. dev が作られていれば、API のイメージを ECR に入れてマイグレーションを流し、サービスを
+   切り替える。続けてフロントエンドのサービスを切り替える。作られていなければ飛ばす。
+3. prod は Environment の承認を待ってから、2 と同じことをする。
+
+フロントエンドのサービスが無い環境（`domain_name` が未設定）では、フロントエンドの手順を飛ばす。
 
 マイグレーションは、新しいイメージのタスク定義でコマンドを `/migrate up` に替えた ECS タスクを
 1 回動かして流す。失敗するとサービスは切り替えない。ログは CloudWatch Logs の
@@ -192,7 +223,9 @@ main の CI が通ると、GitHub Actions の `Deploy` ワークフローが動�
 ### ロールバック
 
 Actions の `Deploy` ワークフローを手動で実行し、環境と戻す先のイメージのタグを指定する。
-タグはコミットの SHA を 40 文字で渡す。ECR には直近の 30 個のイメージが残っている。
+タグはコミットの SHA を 40 文字で渡す。API とフロントエンドの両方をそのタグに戻す。
+ECR には直近の 30 個のイメージが残っている。フロントエンドの ECR にそのタグが無いときは、
+フロントエンドは今のものを残す。
 
 ```bash
 git rev-parse <戻す先のコミット>
@@ -203,9 +236,11 @@ git rev-parse <戻す先のコミット>
 手元から入れ替えるときは `scripts/deploy.sh` を使う（`jq` が要る）。
 
 ```bash
-arn="$(scripts/deploy.sh register prod <タグ>)"
-scripts/deploy.sh update prod "$arn"
+arn="$(scripts/deploy.sh register prod api <タグ>)"
+scripts/deploy.sh update prod api "$arn"
 ```
+
+フロントエンドは `api` を `web` に替える。
 
 ### Terraform の apply
 
@@ -215,6 +250,22 @@ PR で手元の `make infra-plan` の差分を確かめ、main にマージし�
 
 環境を一から作るときは ECR とイメージを先に用意する必要があるため、上の「初回の構築」を
 手元で行う。
+
+### フロントエンドの配信
+
+CloudFront のオリジンは API と同じ ALB で、ALB の証明書に合わせて API のドメインを指す。
+CloudFront はオリジンへの要求にヘッダー `X-Anontopic-Route: web` を付け、ALB のリスナールールは
+このヘッダーがある要求だけをフロントエンドに送る。それ以外は API に届く。
+
+| 経路 | CloudFront のキャッシュ |
+| --- | --- |
+| `/_next/static/*` | する（ファイル名に内容のハッシュが入り、Next.js も immutable で返す） |
+| それ以外（HTML・`sitemap.xml`・OGP 画像など） | しない。毎回タスクが返す |
+
+HTML をキャッシュしないため、デプロイの後に CloudFront のキャッシュを消す必要は無い。
+
+Next.js のサーバーは `/topics` を描画するときに、公開ドメインの API（`API_BASE_URL`）を
+NAT インスタンス経由で呼ぶ。ログは CloudWatch Logs の `/ecs/anontopic-<env>-web` にある。
 
 ### WebSocket の接続
 
@@ -301,13 +352,18 @@ GitHub のシークレット `ALARM_EMAIL` にも同じ値を登録する。初�
 | `anontopic-prod-api-cpu` | API のサービスの CPU 使用率の平均が 80% を 15 分超える |
 | `anontopic-prod-api-memory` | API のサービスのメモリ使用率の最大が 85% を超える |
 | `anontopic-prod-api-unhealthy-targets` | ヘルスチェックに失敗しているタスクが 3 分続けてある |
-| `anontopic-prod-api-5xx` | ALB とタスクの 5xx が 5 分間で 10 件を超える |
+| `anontopic-prod-api-5xx` | ALB と API のタスクの 5xx が 5 分間で 10 件を超える |
+| `anontopic-prod-web-cpu` | フロントエンドのサービスの CPU 使用率の平均が 80% を 15 分超える |
+| `anontopic-prod-web-memory` | フロントエンドのサービスのメモリ使用率の最大が 85% を超える |
+| `anontopic-prod-web-no-healthy-targets` | ヘルスチェックに通るフロントエンドのタスクが 3 分続けて無い |
+| `anontopic-prod-web-5xx` | フロントエンドのタスクの 5xx が 5 分間で 10 件を超える |
 | `anontopic-prod-db-cpu` | RDS の CPU 使用率の平均が 80% を 15 分超える |
 | `anontopic-prod-db-connections` | RDS への接続数が 50 を超える |
 | `anontopic-prod-redis-memory` | Redis のメモリ使用率が 80% を超える |
 | `anontopic-prod-nat-status-check` | NAT インスタンスのステータスチェックが 2 分続けて失敗する |
 
-ALB の 2 つは `domain_name` を設定してサービスが ALB につながってから作られる。
+`api` の ALB の 2 つと `web` の 4 つは、`domain_name` を設定してから作られる。ALB 自身が返す
+5xx はターゲットグループごとに分かれないため、フロントエンドへの要求の分も `api-5xx` に入る。
 
 予算 `anontopic-account-monthly` はアカウント全体（dev と state バケットを含む）の月額を見て、
 実際の費用が $270 の 50% / 80% / 100% を超えたら通知する。費用のデータは 1 日に数回しか

@@ -5,6 +5,7 @@ module "network" {
   vpc_cidr           = "10.0.0.0/16"
   availability_zones = ["ap-northeast-1a", "ap-northeast-1c"]
   app_port           = local.app_port
+  web_port           = local.web_port
 }
 
 module "compute" {
@@ -39,6 +40,39 @@ module "compute" {
 
   zone_name       = local.domain_name
   api_record_name = "api.dev"
+}
+
+# サイトは CloudFront から ALB を通して配る（ADR-0035）。ドメインが無いと CloudFront に付ける
+# 証明書も API のオリジンも無いため、作らない。
+module "web" {
+  source = "../../modules/web"
+  count  = local.domain_name == null ? 0 : 1
+
+  providers = {
+    aws           = aws
+    aws.us_east_1 = aws.us_east_1
+  }
+
+  name_prefix        = "${local.project}-${local.env}"
+  vpc_id             = module.network.vpc_id
+  private_subnet_ids = module.network.private_subnet_ids
+  security_group_id  = module.network.web_security_group_id
+  port               = local.web_port
+
+  cluster_arn   = module.compute.cluster_arn
+  desired_count = 1
+
+  # dev は追加開発のときだけ作り、普段は destroy しておく。
+  ecr_force_delete = true
+  cpu              = 256
+  memory           = 512
+
+  api_base_url = module.compute.api_url
+
+  listener_arn       = module.compute.https_listener_arn
+  zone_name          = local.domain_name
+  domain_name        = "dev.${local.domain_name}"
+  origin_domain_name = module.compute.api_domain_name
 }
 
 module "database" {
