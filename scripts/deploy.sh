@@ -1,19 +1,18 @@
 #!/usr/bin/env bash
-# ECS で動く API を新しいイメージに入れ替える。GitHub Actions のデプロイが呼ぶほか、
+# ECS で動くアプリ（api / web）を新しいイメージに入れ替える。GitHub Actions のデプロイが呼ぶほか、
 # 手元から AWS の認証情報を付けて呼んでもよい。
 #
-#   scripts/deploy.sh present   <env>          環境が作られていれば 0、無ければ 1 で終わる
-#   scripts/deploy.sh has-image <env> <tag>    ECR にそのタグのイメージがあれば 0、無ければ 1 で終わる
-#   scripts/deploy.sh register  <env> <tag>    最新のタスク定義のイメージを差し替えて登録し、ARN を出す
-#   scripts/deploy.sh migrate   <env> <arn>    そのタスク定義でマイグレーションを流し、終わるまで待つ
-#   scripts/deploy.sh update    <env> <arn>    サービスをそのタスク定義に切り替え、終わるまで待つ
+#   scripts/deploy.sh present   <env> <app>          サービスが作られていれば 0、無ければ 1 で終わる
+#   scripts/deploy.sh has-image <env> <app> <tag>    ECR にそのタグのイメージがあれば 0、無ければ 1 で終わる
+#   scripts/deploy.sh register  <env> <app> <tag>    最新のタスク定義のイメージを差し替えて登録し、ARN を出す
+#   scripts/deploy.sh migrate   <env> <arn>          api のタスク定義でマイグレーションを流し、終わるまで待つ
+#   scripts/deploy.sh update    <env> <app> <arn>    サービスをそのタスク定義に切り替え、終わるまで待つ
 #
 # 公開リポジトリの Actions のログは誰でも読める。アプリのログや接続先は出さず、
 # CloudWatch Logs のどこを見ればよいかだけを出す。
 set -euo pipefail
 
 project=anontopic
-container=api
 
 # サービスの切り替えを待つ上限。登録解除の遅延（300 秒）と新しいタスクの起動を含めて収まる長さにする。
 update_timeout_seconds=1800
@@ -31,19 +30,25 @@ usage() {
 
 names() {
 	env=$1
+	app=$2
 	case $env in
 	dev | prod) ;;
 	*) die "環境は dev か prod を指定する: $env" ;;
 	esac
+	case $app in
+	api | web) ;;
+	*) die "アプリは api か web を指定する: $app" ;;
+	esac
 	cluster="$project-$env"
-	service="$project-$env-api"
-	family="$project-$env-api"
-	repository="$project-$env-api"
-	log_group="/ecs/$project-$env-api"
+	service="$project-$env-$app"
+	family="$project-$env-$app"
+	repository="$project-$env-$app"
+	container=$app
+	log_group="/ecs/$project-$env-$app"
 }
 
 present() {
-	names "$1"
+	names "$1" "$2"
 	local clusters services
 	clusters=$(aws ecs describe-clusters --clusters "$cluster" \
 		--query 'length(clusters[?status==`ACTIVE`])' --output text)
@@ -54,16 +59,16 @@ present() {
 }
 
 has_image() {
-	names "$1"
-	aws ecr describe-images --repository-name "$repository" --image-ids "imageTag=$2" >/dev/null 2>&1
+	names "$1" "$2"
+	aws ecr describe-images --repository-name "$repository" --image-ids "imageTag=$3" >/dev/null 2>&1
 }
 
 # Terraform が変えたタスク定義（環境変数や秘密の追加）も取り込めるよう、ファミリーの最新の
 # リビジョンを元にする。
 register() {
-	names "$1"
-	local tag=$2 uri current input
-	has_image "$env" "$tag" || die "ECR の $repository にタグ $tag のイメージが無い"
+	names "$1" "$2"
+	local tag=$3 uri current input
+	has_image "$env" "$app" "$tag" || die "ECR の $repository にタグ $tag のイメージが無い"
 
 	uri=$(aws ecr describe-repositories --repository-names "$repository" \
 		--query 'repositories[0].repositoryUri' --output text)
@@ -84,7 +89,7 @@ register() {
 
 # サービスと同じサブネットとセキュリティグループで、コマンドだけを /migrate up に替えて 1 回動かす。
 migrate() {
-	names "$1"
+	names "$1" api
 	local arn=$2 network overrides started task task_id result exit_code reason
 	network=$(aws ecs describe-services --cluster "$cluster" --services "$service" \
 		--query 'services[0].networkConfiguration' --output json)
@@ -116,8 +121,8 @@ migrate() {
 # ECS のサーキットブレーカーは、新しいタスクが起動しないと元のタスク定義に戻す。戻った後も
 # サービスは安定状態になるため、待つのはサービスではなく今回のデプロイの結果にする。
 update() {
-	names "$1"
-	local arn=$2 deployment state waited=0
+	names "$1" "$2"
+	local arn=$3 deployment state waited=0
 	deployment=$(aws ecs update-service --cluster "$cluster" --service "$service" \
 		--task-definition "$arn" \
 		--query 'service.deployments[?status==`PRIMARY`] | [0].id' --output text)
@@ -148,10 +153,10 @@ command=$1
 shift
 
 case $command in
-present) [ $# -eq 1 ] || usage; present "$@" ;;
-has-image) [ $# -eq 2 ] || usage; has_image "$@" ;;
-register) [ $# -eq 2 ] || usage; register "$@" ;;
+present) [ $# -eq 2 ] || usage; present "$@" ;;
+has-image) [ $# -eq 3 ] || usage; has_image "$@" ;;
+register) [ $# -eq 3 ] || usage; register "$@" ;;
 migrate) [ $# -eq 2 ] || usage; migrate "$@" ;;
-update) [ $# -eq 2 ] || usage; update "$@" ;;
+update) [ $# -eq 3 ] || usage; update "$@" ;;
 *) usage ;;
 esac

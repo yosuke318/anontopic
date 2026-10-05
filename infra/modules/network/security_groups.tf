@@ -1,5 +1,6 @@
-# 通信を許すのは インターネット → ALB → アプリ → RDS / ElastiCache の向きと、
-# 運用者が NAT インスタンスを経由して RDS に入る向きだけにする。
+# 通信を許すのは インターネット → ALB → アプリ → RDS / ElastiCache の向き、
+# インターネット → ALB → フロントエンドの向きと、運用者が NAT インスタンスを経由して
+# RDS に入る向きだけにする。
 # RDS と ElastiCache のグループは外向きのルールを持たない。
 
 resource "aws_security_group" "alb" {
@@ -19,6 +20,16 @@ resource "aws_security_group" "app" {
 
   tags = {
     Name = "${var.name_prefix}-app"
+  }
+}
+
+resource "aws_security_group" "web" {
+  name        = "${var.name_prefix}-web"
+  description = "Web: traffic from the ALB only"
+  vpc_id      = aws_vpc.this.id
+
+  tags = {
+    Name = "${var.name_prefix}-web"
   }
 }
 
@@ -62,6 +73,15 @@ resource "aws_vpc_security_group_egress_rule" "alb_to_app" {
   referenced_security_group_id = aws_security_group.app.id
 }
 
+resource "aws_vpc_security_group_egress_rule" "alb_to_web" {
+  security_group_id            = aws_security_group.alb.id
+  description                  = "Forward to the web frontend"
+  ip_protocol                  = "tcp"
+  from_port                    = var.web_port
+  to_port                      = var.web_port
+  referenced_security_group_id = aws_security_group.web.id
+}
+
 # --- アプリ ---
 
 resource "aws_vpc_security_group_ingress_rule" "app_from_alb" {
@@ -95,6 +115,27 @@ resource "aws_vpc_security_group_egress_rule" "app_to_cache" {
 resource "aws_vpc_security_group_egress_rule" "app_https" {
   security_group_id = aws_security_group.app.id
   description       = "HTTPS to AWS APIs and external services"
+  ip_protocol       = "tcp"
+  from_port         = 443
+  to_port           = 443
+  cidr_ipv4         = "0.0.0.0/0"
+}
+
+# --- フロントエンド ---
+
+resource "aws_vpc_security_group_ingress_rule" "web_from_alb" {
+  security_group_id            = aws_security_group.web.id
+  description                  = "From the ALB"
+  ip_protocol                  = "tcp"
+  from_port                    = var.web_port
+  to_port                      = var.web_port
+  referenced_security_group_id = aws_security_group.alb.id
+}
+
+# ECR・CloudWatch Logs と、サーバー側の描画で呼ぶ API の公開ドメインへの通信。
+resource "aws_vpc_security_group_egress_rule" "web_https" {
+  security_group_id = aws_security_group.web.id
+  description       = "HTTPS to AWS APIs and the public API endpoint"
   ip_protocol       = "tcp"
   from_port         = 443
   to_port           = 443

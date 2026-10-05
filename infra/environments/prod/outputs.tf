@@ -14,6 +14,18 @@ output "api_url" {
   value = module.compute.api_url
 }
 
+output "web_ecr_repository_url" {
+  value = one(module.web[*].ecr_repository_url)
+}
+
+output "web_service_name" {
+  value = one(module.web[*].service_name)
+}
+
+output "site_url" {
+  value = one(module.web[*].site_url)
+}
+
 output "nat_instance_id" {
   value = module.network.nat_instance_id
 }

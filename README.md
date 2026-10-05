@@ -353,6 +353,10 @@ APIサーバーの設定は環境変数で行う。
 `WEB_PORT` を変えたときは、`NEXT_PUBLIC_SITE_URL` とAPI側の `APP_ALLOWED_ORIGINS` も
 同じポートに合わせる。合っていないと、ブラウザからのセッション発行がCORSで止まる。
 
+`NEXT_PUBLIC_` が付く値は `next build` のときに埋め込まれる。本番のイメージ
+（`docker/web.release.Dockerfile`）は環境ごとに `--build-arg` で渡してビルドする。
+手順は [infra/README.md](infra/README.md) にある。
+
 ### スキーマとデータ
 
 | | migrate | seed |

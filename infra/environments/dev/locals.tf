@@ -7,4 +7,5 @@ locals {
   domain_name = var.domain_name == "" ? null : var.domain_name
 
   app_port = 8080
+  web_port = 3000
 }

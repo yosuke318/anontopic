@@ -8,4 +8,5 @@ locals {
   alarm_email = var.alarm_email == "" ? null : var.alarm_email
 
   app_port = 8080
+  web_port = 3000
 }

@@ -114,10 +114,10 @@ Goのコードベースは機能単位（Package by Feature）でディレクト
 ### 2. システム構成概要
 
 ```
-[ユーザー] --HTTPS/WSS--> [Next.js(フロントエンド)]
-                              |
-                              | REST API / WebSocket
-                              v
+[ユーザー] --HTTPS--> [CloudFront] --> [Next.js(フロントエンド、ECS)]
+    |                                       |
+    | REST API / WebSocket(HTTPS/WSS)       | トピック一覧の取得(サーバー側の描画)
+    v                                       v
                 [Go バックエンドサーバー(モジュラーモノリス)]
                   matching / chat / moderation / report / topic / retention
                        |            |
@@ -231,13 +231,14 @@ CREATE TABLE geo_daily_stats (
 | コンポーネント | 構成 | 月額目安(定常時) |
 |---|---|---|
 | WebSocketサーバー(Go) | 小型インスタンス2台(冗長化) | 約$40 |
+| フロントエンド(Next.js) | ECS Fargate 1タスク + CloudFront（ADR-0035） | 約$20 |
 | Redis | 小型ノード1台（ADR-0031） | 約$9〜20 |
 | PostgreSQL | Single-AZ、中型インスタンス（ADR-0031） | 約$35 |
 | DBストレージ(90日分) | 約240GB | 約$28 |
 | バックアップ | 定常分 | 約$23 |
 | データ転送(egress) | 1,000同時接続想定 | 約$109 |
 | GeoIPデータベース | MaxMind GeoLite2(無料)を使用 | $0 |
-| **合計目安** | | **約$245(≒3.7万円)/月** |
+| **合計目安** | | **約$265(≒4.0万円)/月** |
 
 ### 6. コスト上限の歯止め設計
 

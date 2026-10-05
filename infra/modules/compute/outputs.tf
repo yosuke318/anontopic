@@ -37,3 +37,17 @@ output "load_balancer_attached" {
   description = "サービスが ALB のターゲットグループにつながっているか。zone_name が null のときは false。"
   value       = local.https
 }
+
+output "cluster_arn" {
+  value = aws_ecs_cluster.this.arn
+}
+
+output "api_domain_name" {
+  description = "API のドメイン。zone_name が null のときは null。"
+  value       = local.api_domain_name
+}
+
+output "https_listener_arn" {
+  description = "ALB の HTTPS リスナーの ARN。zone_name が null のときは null。"
+  value       = one(aws_lb_listener.https[*].arn)
+}
