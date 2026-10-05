@@ -10,6 +10,11 @@ output "task_definition_family" {
   value = aws_ecs_task_definition.web.family
 }
 
+output "target_group_arn_suffix" {
+  description = "ターゲットグループの ARN の末尾。CloudWatch のメトリクスのディメンション TargetGroup に使う。"
+  value       = aws_lb_target_group.web.arn_suffix
+}
+
 output "site_url" {
   value = "https://${var.domain_name}"
 }

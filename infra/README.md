@@ -352,13 +352,18 @@ GitHub のシークレット `ALARM_EMAIL` にも同じ値を登録する。初�
 | `anontopic-prod-api-cpu` | API のサービスの CPU 使用率の平均が 80% を 15 分超える |
 | `anontopic-prod-api-memory` | API のサービスのメモリ使用率の最大が 85% を超える |
 | `anontopic-prod-api-unhealthy-targets` | ヘルスチェックに失敗しているタスクが 3 分続けてある |
-| `anontopic-prod-api-5xx` | ALB とタスクの 5xx が 5 分間で 10 件を超える |
+| `anontopic-prod-api-5xx` | ALB と API のタスクの 5xx が 5 分間で 10 件を超える |
+| `anontopic-prod-web-cpu` | フロントエンドのサービスの CPU 使用率の平均が 80% を 15 分超える |
+| `anontopic-prod-web-memory` | フロントエンドのサービスのメモリ使用率の最大が 85% を超える |
+| `anontopic-prod-web-no-healthy-targets` | ヘルスチェックに通るフロントエンドのタスクが 3 分続けて無い |
+| `anontopic-prod-web-5xx` | フロントエンドのタスクの 5xx が 5 分間で 10 件を超える |
 | `anontopic-prod-db-cpu` | RDS の CPU 使用率の平均が 80% を 15 分超える |
 | `anontopic-prod-db-connections` | RDS への接続数が 50 を超える |
 | `anontopic-prod-redis-memory` | Redis のメモリ使用率が 80% を超える |
 | `anontopic-prod-nat-status-check` | NAT インスタンスのステータスチェックが 2 分続けて失敗する |
 
-ALB の 2 つは `domain_name` を設定してサービスが ALB につながってから作られる。
+`api` の ALB の 2 つと `web` の 4 つは、`domain_name` を設定してから作られる。ALB 自身が返す
+5xx はターゲットグループごとに分かれないため、フロントエンドへの要求の分も `api-5xx` に入る。
 
 予算 `anontopic-account-monthly` はアカウント全体（dev と state バケットを含む）の月額を見て、
 実際の費用が $270 の 50% / 80% / 100% を超えたら通知する。費用のデータは 1 日に数回しか

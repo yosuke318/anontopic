@@ -107,7 +107,11 @@ module "monitoring" {
   load_balancer_attached  = module.compute.load_balancer_attached
   alb_arn_suffix          = module.compute.alb_arn_suffix
   target_group_arn_suffix = module.compute.target_group_arn_suffix
-  db_instance_identifier  = module.database.identifier
-  redis_cluster_id        = module.cache.cluster_id
-  nat_instance_id         = module.network.nat_instance_id
+
+  web_attached                = local.domain_name != null
+  web_service_name            = one(module.web[*].service_name)
+  web_target_group_arn_suffix = one(module.web[*].target_group_arn_suffix)
+  db_instance_identifier      = module.database.identifier
+  redis_cluster_id            = module.cache.cluster_id
+  nat_instance_id             = module.network.nat_instance_id
 }

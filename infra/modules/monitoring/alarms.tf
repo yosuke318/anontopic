@@ -75,11 +75,12 @@ resource "aws_cloudwatch_metric_alarm" "alb_unhealthy" {
 }
 
 # 正常なタスクが 1 つも無いときは ALB 自身が 503 を返すため、ELB の 5xx も合わせて数える。
+# ELB の 5xx はターゲットグループごとに分かれないため、フロントエンドへの要求の分もここに入る。
 resource "aws_cloudwatch_metric_alarm" "alb_5xx" {
   count = var.load_balancer_attached ? 1 : 0
 
   alarm_name        = "${var.name_prefix}-api-5xx"
-  alarm_description = "ALB とタスクが返した 5xx が 5 分間で ${var.alb_5xx_threshold} 件を超えた。"
+  alarm_description = "ALB と API のタスクが返した 5xx が 5 分間で ${var.alb_5xx_threshold} 件を超えた。"
 
   evaluation_periods  = 1
   comparison_operator = "GreaterThanThreshold"
@@ -111,11 +112,110 @@ resource "aws_cloudwatch_metric_alarm" "alb_5xx" {
     metric {
       namespace   = "AWS/ApplicationELB"
       metric_name = "HTTPCode_Target_5XX_Count"
-      dimensions  = { LoadBalancer = var.alb_arn_suffix }
-      stat        = "Sum"
-      period      = 300
+      dimensions = {
+        LoadBalancer = var.alb_arn_suffix
+        TargetGroup  = var.target_group_arn_suffix
+      }
+      stat   = "Sum"
+      period = 300
     }
   }
+
+  alarm_actions = local.alarm_actions
+  ok_actions    = local.alarm_actions
+}
+
+# --- フロントエンド ---
+
+resource "aws_cloudwatch_metric_alarm" "web_cpu" {
+  count = var.web_attached ? 1 : 0
+
+  alarm_name        = "${var.name_prefix}-web-cpu"
+  alarm_description = "フロントエンドのサービスの CPU 使用率が 15 分続けて ${var.ecs_cpu_threshold}% を超えている。"
+
+  namespace   = "AWS/ECS"
+  metric_name = "CPUUtilization"
+  dimensions = {
+    ClusterName = var.ecs_cluster_name
+    ServiceName = var.web_service_name
+  }
+  statistic           = "Average"
+  period              = 300
+  evaluation_periods  = 3
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = var.ecs_cpu_threshold
+  treat_missing_data  = "missing"
+
+  alarm_actions = local.alarm_actions
+  ok_actions    = local.alarm_actions
+}
+
+resource "aws_cloudwatch_metric_alarm" "web_memory" {
+  count = var.web_attached ? 1 : 0
+
+  alarm_name        = "${var.name_prefix}-web-memory"
+  alarm_description = "フロントエンドのサービスのメモリ使用率が ${var.ecs_memory_threshold}% を超えた。使い切るとタスクが強制終了され、置き換わるまでサイトが応答しない。"
+
+  namespace   = "AWS/ECS"
+  metric_name = "MemoryUtilization"
+  dimensions = {
+    ClusterName = var.ecs_cluster_name
+    ServiceName = var.web_service_name
+  }
+  statistic           = "Maximum"
+  period              = 300
+  evaluation_periods  = 1
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = var.ecs_memory_threshold
+  treat_missing_data  = "missing"
+
+  alarm_actions = local.alarm_actions
+  ok_actions    = local.alarm_actions
+}
+
+# タスクは 1 つだけなので、異常なタスクの数ではなく正常なタスクが残っているかを見る。
+# タスクが消えてターゲットが 0 になったときも、正常なタスクの数は 0 になる。
+resource "aws_cloudwatch_metric_alarm" "web_no_healthy_targets" {
+  count = var.web_attached ? 1 : 0
+
+  alarm_name        = "${var.name_prefix}-web-no-healthy-targets"
+  alarm_description = "ALB のヘルスチェック（/）に通るフロントエンドのタスクが 3 分続けて 1 つも無い。サイトが応答していない。"
+
+  namespace   = "AWS/ApplicationELB"
+  metric_name = "HealthyHostCount"
+  dimensions = {
+    LoadBalancer = var.alb_arn_suffix
+    TargetGroup  = var.web_target_group_arn_suffix
+  }
+  statistic           = "Minimum"
+  period              = 60
+  evaluation_periods  = 3
+  comparison_operator = "LessThanThreshold"
+  threshold           = 1
+  treat_missing_data  = "breaching"
+
+  alarm_actions = local.alarm_actions
+  ok_actions    = local.alarm_actions
+}
+
+resource "aws_cloudwatch_metric_alarm" "web_5xx" {
+  count = var.web_attached ? 1 : 0
+
+  alarm_name        = "${var.name_prefix}-web-5xx"
+  alarm_description = "フロントエンドのタスクが返した 5xx が 5 分間で ${var.alb_5xx_threshold} 件を超えた。"
+
+  namespace   = "AWS/ApplicationELB"
+  metric_name = "HTTPCode_Target_5XX_Count"
+  dimensions = {
+    LoadBalancer = var.alb_arn_suffix
+    TargetGroup  = var.web_target_group_arn_suffix
+  }
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 1
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = var.alb_5xx_threshold
+  treat_missing_data  = "notBreaching"
 
   alarm_actions = local.alarm_actions
   ok_actions    = local.alarm_actions
