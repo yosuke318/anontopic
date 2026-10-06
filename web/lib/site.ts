@@ -29,3 +29,8 @@ export const siteUrl = parseSiteUrl(process.env.NEXT_PUBLIC_SITE_URL);
 export function absoluteUrl(path: string): string {
   return new URL(path, siteUrl).toString();
 }
+
+// 運営者は個人で、氏名と住所はページに載せず、求めがあれば回答する（/contact）。
+export const operatorName = `${siteName} 運営者`;
+
+export const contactEmail = "contact@example.com";

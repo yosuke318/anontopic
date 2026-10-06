@@ -16,6 +16,12 @@ import {
   type TimelineItem,
 } from "@/lib/use-room-socket";
 
+const legalLinks = [
+  { href: "/terms", label: "利用規約" },
+  { href: "/privacy", label: "プライバシーポリシー" },
+  { href: "/contact", label: "お問い合わせ" },
+];
+
 const statusLabels: Record<RoomStatus, string> = {
   connecting: "接続しています",
   open: "接続中",
@@ -398,6 +404,21 @@ export function ChatRoom({ conversationId, topics }: { conversationId: string; t
             })}
           </div>
         )}
+
+        {/* 会話を離れずに読めるよう、別のタブで開く。 */}
+        <nav aria-label="規約と窓口" className="text-muted mt-2 flex flex-wrap gap-x-4 text-xs">
+          {legalLinks.map((link) => (
+            <Link
+              key={link.href}
+              href={link.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-foreground underline-offset-2 hover:underline"
+            >
+              {link.label}
+            </Link>
+          ))}
+        </nav>
       </header>
 
       <div className="relative flex-1 overflow-hidden">

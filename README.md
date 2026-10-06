@@ -221,6 +221,8 @@ curl -H "Authorization: Bearer $TOKEN" 'localhost:8080/api/admin/claims?status=o
 
 会話ログでは参加者をルーム内の番号で示し、セッショントークンは返さない。
 
+通報・申し立て・開示の請求を受けたときの手順は [docs/takedown-flow.md](docs/takedown-flow.md) にある。
+
 ### BAN と段階的制裁
 
 制裁は警告 → 一時停止 → 恒久停止の 3 段階で、`banned_identifiers` に 1 段階 1 行で残す。

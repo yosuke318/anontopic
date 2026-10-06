@@ -1,11 +1,16 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
 
 import { ApiError } from "@/lib/api";
 import { issueSession, joinQueue, roomTypes, type RoomType } from "@/lib/matching";
+import { acceptTerms, useTermsAccepted } from "@/lib/terms-consent";
 import type { Topic } from "@/lib/topics";
+
+const siteNotice =
+  "このサービスは雑談・趣味・相談のためのものです。出会いや交際を目的とした利用、連絡先の交換はできません。はじめる前に";
 
 const roomTypeHint = "3 人が揃わないときは、しばらく待ってから 2 人で始まります。";
 
@@ -40,16 +45,22 @@ export function TopicPicker({ topics }: { topics: Topic[] }) {
   const [roomType, setRoomType] = useState<RoomType>(3);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const termsAccepted = useTermsAccepted();
+  const [agreed, setAgreed] = useState(false);
+  const canStart = topicId !== null && (termsAccepted || agreed);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (topicId === null || submitting) {
+    if (topicId === null || !canStart || submitting) {
       return;
     }
 
     setSubmitting(true);
     setError(null);
     try {
+      if (!termsAccepted) {
+        acceptTerms();
+      }
       await issueSession();
       await joinQueue(topicId, roomType);
       router.push("/waiting");
@@ -128,16 +139,45 @@ export function TopicPicker({ topics }: { topics: Topic[] }) {
         </p>
       )}
 
+      {!termsAccepted && (
+        <div className="border-line mt-12 rounded-2xl border p-5">
+          <p className="text-muted text-sm leading-6">
+            {siteNotice}
+            <Link href="/terms" target="_blank" className="text-foreground underline">
+              利用規約
+            </Link>
+            と
+            <Link href="/privacy" target="_blank" className="text-foreground underline">
+              プライバシーポリシー
+            </Link>
+            をお読みください。
+          </p>
+          <label className="mt-4 flex cursor-pointer items-start gap-3 leading-7">
+            <input
+              type="checkbox"
+              checked={agreed}
+              onChange={(event) => setAgreed(event.target.checked)}
+              className="accent-brand mt-1.5 h-4 w-4 shrink-0"
+            />
+            <span className="font-medium">利用規約とプライバシーポリシーに同意する</span>
+          </label>
+        </div>
+      )}
+
       <div className="mt-10">
         <button
           type="submit"
-          disabled={topicId === null || submitting}
+          disabled={!canStart || submitting}
           className="bg-brand text-brand-contrast hover:bg-brand-hover inline-flex h-12 items-center justify-center rounded-full px-8 text-base font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
         >
           {submitting ? "待機を始めています…" : "話しはじめる"}
         </button>
-        {topicId === null && (
-          <p className="text-muted mt-3 text-sm">トピックを選ぶと押せるようになります。</p>
+        {!canStart && (
+          <p className="text-muted mt-3 text-sm">
+            {termsAccepted
+              ? "トピックを選ぶと押せるようになります。"
+              : "トピックを選び、利用規約に同意すると押せるようになります。"}
+          </p>
         )}
       </div>
     </form>
