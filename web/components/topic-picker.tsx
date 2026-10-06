@@ -143,11 +143,11 @@ export function TopicPicker({ topics }: { topics: Topic[] }) {
         <div className="border-line mt-12 rounded-2xl border p-5">
           <p className="text-muted text-sm leading-6">
             {siteNotice}
-            <Link href="/terms" target="_blank" className="text-foreground underline">
+            <Link href="/terms" target="_blank" rel="noopener noreferrer" className="text-foreground underline">
               利用規約
             </Link>
             と
-            <Link href="/privacy" target="_blank" className="text-foreground underline">
+            <Link href="/privacy" target="_blank" rel="noopener noreferrer" className="text-foreground underline">
               プライバシーポリシー
             </Link>
             をお読みください。
