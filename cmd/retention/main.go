@@ -3,13 +3,14 @@
 //
 // Usage:
 //
-//	retention            パーティションを作成・削除する
-//	retention -dry-run   作成・削除の予定だけをログに出し、何も変えない
+//	retention            パーティションを作成・削除し、期限を過ぎた参加者の識別子を消す
+//	retention -dry-run   作成・削除・消去の予定だけをログに出し、何も変えない
 //
 // The command exits with status 1 when any step failed, and logs every failure
 // with the message "retention failed", which is what an alert should watch.
 // The reasoning is in
-// docs/adr/0026-drop-daily-message-partitions-and-move-reported-messages-aside.md.
+// docs/adr/0026-drop-daily-message-partitions-and-move-reported-messages-aside.md
+// and docs/adr/0037-keep-only-hashed-sender-identifiers-and-erase-them-after-180-days.md.
 package main
 
 import (
@@ -25,6 +26,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/yosuke318/anontopic/internal/chat"
+	"github.com/yosuke318/anontopic/internal/matching"
 	"github.com/yosuke318/anontopic/internal/report"
 	"github.com/yosuke318/anontopic/internal/retention"
 )
@@ -60,10 +62,12 @@ func run(dryRun bool) error {
 
 	svc := retention.NewService(
 		messagePartitions{chat.NewPartitions(pool)},
+		matching.NewPostgresRepository(pool),
 		report.NewService(report.NewPostgresRepository(pool), nil, nil),
 		retention.Options{
-			MessageDays: envInt("RETENTION_MESSAGE_DAYS", retention.DefaultMessageDays),
-			AheadDays:   envInt("RETENTION_AHEAD_DAYS", retention.DefaultAheadDays),
+			MessageDays:    envInt("RETENTION_MESSAGE_DAYS", retention.DefaultMessageDays),
+			IdentifierDays: envInt("RETENTION_IDENTIFIER_DAYS", retention.DefaultIdentifierDays),
+			AheadDays:      envInt("RETENTION_AHEAD_DAYS", retention.DefaultAheadDays),
 		},
 	)
 
@@ -80,7 +84,9 @@ func run(dryRun bool) error {
 		slog.Int64("retained_messages", retained),
 		slog.Int("partitions", res.Partitions),
 		slog.Int64("partition_bytes", res.Bytes),
-		slog.Time("covered_until", res.CoveredUntil))
+		slog.Time("covered_until", res.CoveredUntil),
+		slog.Int("erased_conversations", res.ErasedConversations),
+		slog.Int64("erased_participants", res.ErasedParticipants))
 
 	return err
 }
