@@ -380,6 +380,11 @@ APIサーバーの設定は環境変数で行う。
   その先の作成と 90 日を過ぎた分の削除は保持期間バッチ（`cmd/retention`）が受け持つ。
   削除の前に、通報された会話のメッセージは `retained_messages` に移して残す。
   行の入っている月次パーティションは、期限が来て削除されるまでそのまま使う。
+- 同じバッチが、参加から 180 日を過ぎた `conversation_participants` の `ip_hash` と
+  `device_fingerprint` を NULL にする。通報された会話の参加者の分は残す。日数は
+  `RETENTION_IDENTIFIER_DAYS` で変えられる。理由は
+  [ADR-0037](docs/adr/0037-keep-only-hashed-sender-identifiers-and-erase-them-after-180-days.md)、
+  開示の請求を受けたときの抽出は [docs/takedown-flow.md](docs/takedown-flow.md)。
 - 保持期間バッチは本番では深夜に 1 日 1 回スケジューラから起動する。失敗すると
   `retention failed` を出して終了コード 1 で終わるので、そこにアラートを張る。
   ローカルでは `make retention-dry-run` で予定を見てから `make retention` で流せる。

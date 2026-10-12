@@ -1,6 +1,12 @@
 // Package retention owns scheduled deletion of expired data (rooms,
 // messages, logs) according to the service's retention policy.
 //
+// The identifiers recorded for the participants of a conversation, the
+// ip_hash and the device_fingerprint, are erased once they are older than
+// their own retention period, except for the participants of a reported
+// conversation. The reasoning is in
+// docs/adr/0037-keep-only-hashed-sender-identifiers-and-erase-them-after-180-days.md.
+//
 // Messages are kept in daily partitions of the messages table. A run creates
 // the partitions the days ahead need, and drops each partition whose every
 // message is older than the retention period. The messages of a reported
@@ -10,9 +16,10 @@
 //
 // Boundary: each module exposes its own purge operation; retention
 // orchestrates them and never deletes other modules' rows itself. The
-// partitions belong to the chat module and are reached through Messages, and
-// which conversations were reported is asked of the report module through
-// Reports.
+// partitions belong to the chat module and are reached through Messages, the
+// participants are recorded by the matching module and reached through
+// Participants, and which conversations were reported is asked of the report
+// module through Reports.
 package retention
 
 import (
@@ -28,6 +35,11 @@ const (
 	// DefaultMessageDays is how many days a message is kept. The service
 	// promises its users that conversations are deleted after 90 days.
 	DefaultMessageDays = 90
+
+	// DefaultIdentifierDays is how many days the identifiers of a participant
+	// are kept, counted from when the participant joined. The privacy policy
+	// promises six months.
+	DefaultIdentifierDays = 180
 
 	// DefaultAheadDays is how many days from today a run makes sure there are
 	// partitions for. A message whose time no partition holds cannot be
@@ -81,6 +93,20 @@ type Messages interface {
 	DropPartition(ctx context.Context, partition string, keep []string) (int64, error)
 }
 
+// Participants is what retention asks of the module that records the
+// participants of each conversation.
+type Participants interface {
+	// IdentifiedBefore returns the id of every conversation with a
+	// participant who joined before cutoff and still has an identifier
+	// recorded.
+	IdentifiedBefore(ctx context.Context, cutoff time.Time) ([]string, error)
+
+	// EraseIdentifiers erases the identifiers of the participants of the
+	// given conversations who joined before cutoff, returning how many
+	// participants it changed.
+	EraseIdentifiers(ctx context.Context, cutoff time.Time, conversationIDs []string) (int64, error)
+}
+
 // Reports is what retention asks of the module that takes reports.
 type Reports interface {
 	// Reported returns the conversations among conversationIDs that were
@@ -90,32 +116,41 @@ type Reports interface {
 
 // Options tunes a Service. A field left at zero takes its default.
 type Options struct {
-	MessageDays int
-	AheadDays   int
+	MessageDays    int
+	IdentifierDays int
+	AheadDays      int
 }
 
 // Service runs the retention policy.
 type Service struct {
-	messages    Messages
-	reports     Reports
-	messageDays int
-	aheadDays   int
+	messages       Messages
+	participants   Participants
+	reports        Reports
+	messageDays    int
+	identifierDays int
+	aheadDays      int
 }
 
-// NewService builds a Service that manages the partitions of messages and
-// keeps the conversations reports says were reported.
-func NewService(messages Messages, reports Reports, opts Options) *Service {
+// NewService builds a Service that manages the partitions of messages,
+// erases the identifiers of participants, and keeps both for the
+// conversations reports says were reported.
+func NewService(messages Messages, participants Participants, reports Reports, opts Options) *Service {
 	if opts.MessageDays <= 0 {
 		opts.MessageDays = DefaultMessageDays
+	}
+	if opts.IdentifierDays <= 0 {
+		opts.IdentifierDays = DefaultIdentifierDays
 	}
 	if opts.AheadDays <= 0 {
 		opts.AheadDays = DefaultAheadDays
 	}
 	return &Service{
-		messages:    messages,
-		reports:     reports,
-		messageDays: opts.MessageDays,
-		aheadDays:   opts.AheadDays,
+		messages:       messages,
+		participants:   participants,
+		reports:        reports,
+		messageDays:    opts.MessageDays,
+		identifierDays: opts.IdentifierDays,
+		aheadDays:      opts.AheadDays,
 	}
 }
 
@@ -139,6 +174,12 @@ type Result struct {
 	// CoveredUntil is where the partitions that run on without a gap from
 	// the time of the run end. A message created after it cannot be recorded.
 	CoveredUntil time.Time
+	// ErasedConversations is how many conversations had the identifiers of
+	// their participants erased.
+	ErasedConversations int
+	// ErasedParticipants is how many participants had their identifiers
+	// erased. A dry run leaves it at zero.
+	ErasedParticipants int64
 }
 
 // Run applies the retention policy as of now. A dry run reads what it would
@@ -206,7 +247,50 @@ func (s *Service) Run(ctx context.Context, now time.Time, dryRun bool) (Result, 
 	})
 	res.CoveredUntil = coveredUntil(remaining, now)
 
+	if err := s.eraseIdentifiers(ctx, now, dryRun, &res); err != nil {
+		slog.Error("erase participant identifiers", slog.Any("error", err))
+		errs = append(errs, fmt.Errorf("erase participant identifiers: %w", err))
+	}
+
 	return res, errors.Join(errs...)
+}
+
+// eraseIdentifiers erases the identifiers of the participants who joined
+// longer ago than the identifier retention period, keeping those of the
+// reported conversations. A dry run only counts the conversations.
+func (s *Service) eraseIdentifiers(ctx context.Context, now time.Time, dryRun bool, res *Result) error {
+	cutoff := now.Add(-time.Duration(s.identifierDays) * day)
+
+	ids, err := s.participants.IdentifiedBefore(ctx, cutoff)
+	if err != nil {
+		return fmt.Errorf("list conversations: %w", err)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+
+	reported, err := s.reports.Reported(ctx, ids)
+	if err != nil {
+		return fmt.Errorf("ask which conversations were reported: %w", err)
+	}
+	erase := slices.DeleteFunc(slices.Clone(ids), func(id string) bool { return slices.Contains(reported, id) })
+
+	res.ErasedConversations = len(erase)
+	if !dryRun && len(erase) > 0 {
+		n, err := s.participants.EraseIdentifiers(ctx, cutoff, erase)
+		if err != nil {
+			res.ErasedConversations = 0
+			return err
+		}
+		res.ErasedParticipants = n
+	}
+
+	slog.Info("erase participant identifiers",
+		slog.Bool("dry_run", dryRun), slog.Time("joined_before", cutoff),
+		slog.Int("conversations", res.ErasedConversations),
+		slog.Int("kept_reported", len(reported)),
+		slog.Int64("participants", res.ErasedParticipants))
+	return nil
 }
 
 // drop keeps the messages of the reported conversations in p and drops it,

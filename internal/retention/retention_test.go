@@ -86,6 +86,42 @@ func (f *fakeReports) Reported(_ context.Context, conversationIDs []string) ([]s
 	return out, nil
 }
 
+// fakeParticipants keeps, per conversation, when its participants joined and
+// how many of them still have identifiers recorded.
+type fakeParticipants struct {
+	joined     map[string]time.Time
+	identified map[string]int64
+
+	eraseErr error
+	cutoffs  []time.Time
+}
+
+func (f *fakeParticipants) IdentifiedBefore(_ context.Context, cutoff time.Time) ([]string, error) {
+	f.cutoffs = append(f.cutoffs, cutoff)
+	var ids []string
+	for id, at := range f.joined {
+		if at.Before(cutoff) && f.identified[id] > 0 {
+			ids = append(ids, id)
+		}
+	}
+	slices.Sort(ids)
+	return ids, nil
+}
+
+func (f *fakeParticipants) EraseIdentifiers(_ context.Context, cutoff time.Time, conversationIDs []string) (int64, error) {
+	if f.eraseErr != nil {
+		return 0, f.eraseErr
+	}
+	var n int64
+	for _, id := range conversationIDs {
+		if f.joined[id].Before(cutoff) {
+			n += f.identified[id]
+			f.identified[id] = 0
+		}
+	}
+	return n, nil
+}
+
 var now = time.Date(2026, 9, 27, 18, 30, 0, 0, time.UTC)
 
 func date(month time.Month, d int) time.Time {
@@ -114,7 +150,7 @@ func TestRunDropsThePartitionsOlderThanTheRetentionPeriodAndKeepsReportedConvers
 	}
 	reports := &fakeReports{reported: []string{"reported"}}
 
-	res, err := NewService(messages, reports, Options{}).Run(t.Context(), now, false)
+	res, err := NewService(messages, &fakeParticipants{}, reports, Options{}).Run(t.Context(), now, false)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -158,7 +194,7 @@ func TestRunCreatesTheDailyPartitionsTheDaysAheadLack(t *testing.T) {
 		{Name: "messages_20261003", From: date(10, 3), To: date(10, 4)},
 	}}
 
-	res, err := NewService(messages, &fakeReports{}, Options{AheadDays: 8}).Run(t.Context(), now, false)
+	res, err := NewService(messages, &fakeParticipants{}, &fakeReports{}, Options{AheadDays: 8}).Run(t.Context(), now, false)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -204,7 +240,7 @@ func TestADryRunChangesNothing(t *testing.T) {
 	}
 	before := slices.Clone(messages.partitions)
 
-	res, err := NewService(messages, &fakeReports{reported: []string{"reported"}}, Options{}).Run(t.Context(), now, true)
+	res, err := NewService(messages, &fakeParticipants{}, &fakeReports{reported: []string{"reported"}}, Options{}).Run(t.Context(), now, true)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -230,7 +266,7 @@ func TestRunGoesOnPastAPartitionItFailedToDrop(t *testing.T) {
 		dropErr:    map[string]error{"messages_20260626": failure},
 	}
 
-	res, err := NewService(messages, &fakeReports{}, Options{}).Run(t.Context(), now, false)
+	res, err := NewService(messages, &fakeParticipants{}, &fakeReports{}, Options{}).Run(t.Context(), now, false)
 	if !errors.Is(err, failure) {
 		t.Fatalf("Run = %v, want the failure to drop 06-26", err)
 	}
@@ -243,7 +279,7 @@ func TestRunReportsAPartitionItFailedToCreate(t *testing.T) {
 	failure := errors.New("permission denied")
 	messages := &fakeMessages{createErr: failure}
 
-	res, err := NewService(messages, &fakeReports{}, Options{AheadDays: 2}).Run(t.Context(), now, false)
+	res, err := NewService(messages, &fakeParticipants{}, &fakeReports{}, Options{AheadDays: 2}).Run(t.Context(), now, false)
 	if !errors.Is(err, failure) {
 		t.Fatalf("Run = %v, want the failure to create", err)
 	}
@@ -258,7 +294,7 @@ func TestRunNeverDropsAPartitionWithoutARange(t *testing.T) {
 		Partition{Name: "messages_default", Bytes: 7},
 	)}
 
-	res, err := NewService(messages, &fakeReports{}, Options{}).Run(t.Context(), now, false)
+	res, err := NewService(messages, &fakeParticipants{}, &fakeReports{}, Options{}).Run(t.Context(), now, false)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -267,5 +303,76 @@ func TestRunNeverDropsAPartitionWithoutARange(t *testing.T) {
 	}
 	if res.Bytes != 14*100+7 {
 		t.Fatalf("counted %d bytes left, want the default partition among them", res.Bytes)
+	}
+}
+
+func TestRunErasesTheIdentifiersOlderThanTheRetentionPeriodAndKeepsReportedConversations(t *testing.T) {
+	// The cutoff is 180 days before now: 2026-03-31 18:30.
+	participants := &fakeParticipants{
+		joined: map[string]time.Time{
+			"old":      date(3, 30),
+			"reported": date(3, 30),
+			"young":    date(4, 1),
+		},
+		identified: map[string]int64{"old": 2, "reported": 3, "young": 2},
+	}
+	reports := &fakeReports{reported: []string{"reported"}}
+
+	res, err := NewService(&fakeMessages{}, participants, reports, Options{}).Run(t.Context(), now, false)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if want := now.Add(-180 * day); !participants.cutoffs[0].Equal(want) {
+		t.Fatalf("cutoff = %v, want %v", participants.cutoffs[0], want)
+	}
+	if res.ErasedConversations != 1 || res.ErasedParticipants != 2 {
+		t.Fatalf("erased %d conversations and %d participants, want 1 and 2",
+			res.ErasedConversations, res.ErasedParticipants)
+	}
+	if participants.identified["old"] != 0 || participants.identified["reported"] != 3 || participants.identified["young"] != 2 {
+		t.Fatalf("identified %v, want only old erased", participants.identified)
+	}
+	if !slices.Equal(reports.asked[0], []string{"old", "reported"}) {
+		t.Fatalf("asked about %v, want the conversations older than the cutoff", reports.asked[0])
+	}
+}
+
+func TestADryRunErasesNoIdentifier(t *testing.T) {
+	participants := &fakeParticipants{
+		joined:     map[string]time.Time{"old": date(1, 1)},
+		identified: map[string]int64{"old": 2},
+	}
+
+	res, err := NewService(&fakeMessages{}, participants, &fakeReports{}, Options{}).Run(t.Context(), now, true)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.ErasedConversations != 1 || res.ErasedParticipants != 0 {
+		t.Fatalf("erased %d conversations and %d participants, want 1 counted and none changed",
+			res.ErasedConversations, res.ErasedParticipants)
+	}
+	if participants.identified["old"] != 2 {
+		t.Fatalf("a dry run erased the identifiers of %v", participants.identified)
+	}
+}
+
+func TestRunReportsIdentifiersItFailedToErase(t *testing.T) {
+	participants := &fakeParticipants{
+		joined:     map[string]time.Time{"old": date(1, 1)},
+		identified: map[string]int64{"old": 2},
+		eraseErr:   errors.New("database is gone"),
+	}
+	messages := &fakeMessages{partitions: daily(date(6, 1), date(6, 2))}
+
+	res, err := NewService(messages, participants, &fakeReports{}, Options{}).Run(t.Context(), now, false)
+	if err == nil {
+		t.Fatal("Run returned no error, want the failed erase reported")
+	}
+	if len(res.Dropped) != 1 {
+		t.Fatalf("dropped %d partitions, want the old one dropped regardless", len(res.Dropped))
+	}
+	if res.ErasedConversations != 0 {
+		t.Fatalf("counted %d erased conversations after a failed erase, want 0", res.ErasedConversations)
 	}
 }
