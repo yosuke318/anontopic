@@ -26,12 +26,13 @@ resource "aws_elasticache_replication_group" "this" {
   replication_group_id = var.name_prefix
   description          = "Sessions, matching queue, presence and rate limits"
 
-  engine               = "redis"
-  engine_version       = "7.1"
-  node_type            = var.node_type
-  num_cache_clusters   = 1
-  port                 = 6379
-  parameter_group_name = aws_elasticache_parameter_group.this.name
+  engine                      = "redis"
+  engine_version              = "7.1"
+  node_type                   = var.node_type
+  num_cache_clusters          = 1
+  preferred_cache_cluster_azs = [var.availability_zone]
+  port                        = 6379
+  parameter_group_name        = aws_elasticache_parameter_group.this.name
 
   subnet_group_name  = aws_elasticache_subnet_group.this.name
   security_group_ids = [var.security_group_id]

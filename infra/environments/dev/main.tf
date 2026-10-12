@@ -14,7 +14,7 @@ module "compute" {
   name_prefix           = "${local.project}-${local.env}"
   vpc_id                = module.network.vpc_id
   public_subnet_ids     = module.network.public_subnet_ids
-  private_subnet_ids    = module.network.private_subnet_ids
+  private_subnet_ids    = [module.network.primary_private_subnet_id]
   alb_security_group_id = module.network.alb_security_group_id
   app_security_group_id = module.network.app_security_group_id
   app_port              = local.app_port
@@ -55,7 +55,7 @@ module "web" {
 
   name_prefix        = "${local.project}-${local.env}"
   vpc_id             = module.network.vpc_id
-  private_subnet_ids = module.network.private_subnet_ids
+  private_subnet_ids = [module.network.primary_private_subnet_id]
   security_group_id  = module.network.web_security_group_id
   port               = local.web_port
 
@@ -80,6 +80,7 @@ module "database" {
 
   name_prefix       = "${local.project}-${local.env}"
   subnet_ids        = module.network.private_subnet_ids
+  availability_zone = module.network.primary_availability_zone
   security_group_id = module.network.database_security_group_id
 
   instance_class        = "db.t4g.micro"
@@ -92,6 +93,7 @@ module "cache" {
 
   name_prefix       = "${local.project}-${local.env}"
   subnet_ids        = module.network.private_subnet_ids
+  availability_zone = module.network.primary_availability_zone
   security_group_id = module.network.cache_security_group_id
 
   node_type = "cache.t4g.micro"

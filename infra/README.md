@@ -287,6 +287,8 @@ SIGTERM は登録解除の後に届き、サーバーは書き込み待ちのメ
 
 RDS PostgreSQL と ElastiCache Redis は、どちらも Single-AZ の 1 台で動かす（ADR-0031）。
 インスタンスやその AZ が止まると、立て直すまでサービスも止まる。
+アプリのタスク・RDS・ElastiCache・NAT インスタンスは、`availability_zones` の先頭の AZ に
+寄せて置く（ADR-0039）。サブネットは ALB と DB サブネットグループのために 2 つの AZ に作る。
 
 | | dev | prod |
 | --- | --- | --- |
