@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 
+import { adsenseClient } from "@/lib/ads";
 import { siteDescription, siteName, siteTagline, siteUrl } from "@/lib/site";
 import "./globals.css";
 
@@ -29,6 +30,8 @@ export const metadata: Metadata = {
     index: true,
     follow: true,
   },
+  // AdSense がサイトの所有者を確かめるためのタグ。広告のスクリプトとは別に、全ページに置く。
+  ...(adsenseClient !== "" && { other: { "google-adsense-account": adsenseClient } }),
 };
 
 export const viewport: Viewport = {
