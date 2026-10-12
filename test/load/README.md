@@ -16,7 +16,58 @@ make load-test LOAD_RATE=200 LOAD_DURATION=1m
 Go コードから使う場合は `github.com/tsenart/vegeta/v12/lib` を import する
 （`go.mod` に入っているので追加の `go get` は不要）。
 
-Vegeta は HTTP のみを対象とする。WebSocket（`/ws/rooms/{roomID}`）の負荷試験には別の手段が必要。
+Vegeta は HTTP のみを対象とする。WebSocket（`/ws/rooms/{roomID}`）を含む試験は次の
+「チャットのシナリオ」を使う。
+
+## チャットのシナリオ
+
+`test/load/chat` は、利用者と同じ手順を仮想ユーザーの数だけ並べて流す。
+
+1. `POST /api/session` でセッションを受け取る
+2. `POST /api/matching` で待機キューに入り、成立するまで `GET /api/matching` を 1 秒ごとに呼ぶ
+3. `/ws/rooms/{roomID}` につなぎ、`-interval` ごとにメッセージを送る
+4. `-stay` が過ぎたら接続を閉じ、`DELETE /api/matching` と `DELETE /api/session` で退出する
+
+続けて開始したユーザーは同じキューに入るため、互いにマッチングする。
+
+```bash
+make load-chat                                   # ローカルで 4 人、1 分
+make load-chat CHAT_BASE=https://api.dev.example.com CHAT_USERS=1000 CHAT_STAY=10m
+go run ./test/load/chat -h                       # すべてのフラグ
+```
+
+終わると、各段階を通った人数・失敗の内訳・遅延の分布を出す。
+
+| 項目 | 意味 |
+| --- | --- |
+| `matched` / `session_ok` | その段階を通った仮想ユーザーの数 |
+| `websocket_503` | 全体の接続数の上限で断られた数。上限を超えて流したときに、超えた分だけ出れば上限が効いている |
+| `websocket_429` / `matching_rate_limited` | IP アドレスごとの上限に当たった数 |
+| `error_*` / `ended_*` | サーバーが返した `error` の `code` と、`ended` の `reason` |
+| `delivery` | メッセージを送ってから、同じルームの他の参加者が受け取るまでの時間 |
+| `handshake` | WebSocket のハンドシェイクにかかった時間 |
+
+仮想ユーザーはすべて 1 つのプロセスで動くため、`delivery` は同じ時計で測っている。
+本文は `負荷試験 <英字の通し番号> あああ…` の形にする。数字が続くと電話番号として
+ブロックされるため、通し番号は英字で書く。
+
+### 1 台のクライアントから流すときの上限
+
+サーバーは IP アドレスごとに、接続数（`CAPACITY_MAX_CONNECTIONS_PER_IP`、既定 5）と
+マッチングの要求数（`CAPACITY_MATCH_BURST`、既定 3 回）を絞る。1 台から流すと、
+ここで止まって全体の上限まで届かない。
+
+- ローカル: `CAPACITY_MAX_CONNECTIONS_PER_IP=10000 CAPACITY_MATCH_BURST=10000 make up`
+- dev: `terraform.tfvars` に `load_test = true` を書いて apply する。IP アドレスごとの
+  上限を外し、API を 2 タスク、RDS を `db.t4g.small` にして prod に揃える。
+  試験が終わったら外して apply するか、destroy する。
+
+macOS はプロセスが開けるファイルの数の既定が 256 で、数百本つなぐと足りなくなる。
+流す前に同じシェルで上げておく。
+
+```bash
+ulimit -n 8192
+```
 
 ## 同時接続の上限を確かめる
 

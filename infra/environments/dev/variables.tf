@@ -13,3 +13,9 @@ variable "domain_name" {
   type        = string
   default     = null
 }
+
+variable "load_test" {
+  description = "負荷試験の構成にする。API のタスク数と RDS のクラスを prod に揃え、1 台のクライアントから全員分をつなげるよう IP アドレスごとの上限を外す。"
+  type        = bool
+  default     = false
+}

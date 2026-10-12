@@ -3,7 +3,7 @@
 	backend-build backend-run backend-test backend-lint backend-fmt \
 	frontend-install frontend-build frontend-test frontend-lint frontend-typecheck frontend-format \
 	infra-fmt infra-check infra-plan \
-	load-test load-report
+	load-test load-report load-chat
 
 # 開発ツールのバージョン。CI も同じ値を使うため、ここが唯一の定義になる。
 GOLANGCI_LINT_VERSION ?= v2.13.1
@@ -25,6 +25,13 @@ LOAD_RATE ?= 50
 LOAD_DURATION ?= 30s
 LOAD_TARGETS ?= test/load/targets.txt
 LOAD_RESULT ?= test/load/results/latest.bin
+
+# チャットの負荷試験の既定値。make load-chat CHAT_USERS=1000 CHAT_BASE=https://... のように上書きできる。
+CHAT_BASE ?= http://localhost:8080
+CHAT_USERS ?= 4
+CHAT_RAMP ?= 20
+CHAT_STAY ?= 1m
+CHAT_INTERVAL ?= 10s
 
 # Terraform のルートモジュール。infra-check はこのすべてを validate する。
 TERRAFORM_ROOTS := infra/bootstrap infra/environments/dev infra/environments/prod
@@ -158,3 +165,6 @@ load-test: ## Run a Vegeta load test against a locally running server
 load-report: ## Show the report and latency histogram of the last load test
 	go tool vegeta report $(LOAD_RESULT)
 	go tool vegeta report -type='hist[0,10ms,50ms,100ms,500ms,1s]' $(LOAD_RESULT)
+
+load-chat: ## Run the chat scenario (session, matching, WebSocket) against CHAT_BASE
+	go run ./test/load/chat -base=$(CHAT_BASE) -users=$(CHAT_USERS) -ramp=$(CHAT_RAMP) -stay=$(CHAT_STAY) -interval=$(CHAT_INTERVAL)
