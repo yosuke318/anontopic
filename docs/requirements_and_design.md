@@ -257,7 +257,7 @@ CREATE TABLE geo_daily_stats (
 
 - **LP/紹介ページ**: Next.js App RouterのServer Componentを使用しSSR/SSGで生成。SEO・広告収益化を意識。
 - **チャットルーム画面**: Client Component（`'use client'`）でCSRとし、WebSocket接続・リアルタイム描画に特化。ハイドレーションコストを避ける。
-- **広告表示**: `next/script`の`strategy="lazyOnload"`（または`worker`）でAdSenseスクリプトを遅延読み込みし、チャット機能のパフォーマンスへの影響を抑制。
+- **広告表示**: AdSenseの広告ユニットをLPと紹介ページの本文の途中にだけ手動で置き、待機画面とチャットルーム画面には置かない。スクリプトは`next/script`の`strategy="lazyOnload"`で遅延読み込みし、チャット機能のパフォーマンスへの影響を抑制する（`worker`はApp Routerで動かないため使わない）。広告Cookieの扱いはプライバシーポリシーで公表し、独自の同意バナーは置かない（ADR-0038）。
 
 ### 9. GeoIPを用いた地域・不正検知設計
 

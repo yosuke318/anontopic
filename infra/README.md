@@ -72,6 +72,10 @@ terraform apply
 作らない構成で取り、`Deploy` ワークフローはフロントエンドのビルドを飛ばす。
 ローカルの `terraform.tfvars` の `domain_name` と揃えないと、CI とローカルで plan が食い違う。
 
+AdSense の審査を申し込むときは、Variables に `ADSENSE_CLIENT`（`ca-pub-` で始まる発行者 ID）を、
+広告ユニットを作ったら `ADSENSE_SLOT` を登録する。`Deploy` ワークフローは prod のフロントエンドにだけ
+この 2 つを渡す（ADR-0038）。
+
 CI の `インフラ plan` ジョブは `anontopic-terraform-plan` ロールを OIDC で引き受けて、
 dev と prod の plan を取る。ログには件数の行だけを出す。
 

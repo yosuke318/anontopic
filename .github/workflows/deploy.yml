@@ -76,6 +76,8 @@ jobs:
         env: [dev, prod]
     env:
       DOMAIN_NAME: ${{ vars.DOMAIN_NAME }}
+      ADSENSE_CLIENT: ${{ vars.ADSENSE_CLIENT }}
+      ADSENSE_SLOT: ${{ vars.ADSENSE_SLOT }}
     steps:
       - name: ドメインが登録されているか確かめる
         if: env.DOMAIN_NAME == ''
@@ -88,16 +90,23 @@ jobs:
         if: env.DOMAIN_NAME != ''
       # Next.js はビルド用のステージで動かし、実行用のステージはファイルを写すだけのため、QEMU は要らない。
       # サイトは prod が <ドメイン>、dev が dev.<ドメイン> で、API はそれぞれの頭に api. を付けたもの。
+      # 広告は prod にだけ出す。dev は AdSense の審査を受けたドメインではない（ADR-0038）。
       - name: ビルドする
         if: env.DOMAIN_NAME != ''
         run: |
           site_host="$DOMAIN_NAME"
+          adsense_client="$ADSENSE_CLIENT"
+          adsense_slot="$ADSENSE_SLOT"
           if [ "${{ matrix.env }}" = dev ]; then
             site_host="dev.$DOMAIN_NAME"
+            adsense_client=""
+            adsense_slot=""
           fi
           docker buildx build --platform linux/arm64 --provenance=false \
             --build-arg "NEXT_PUBLIC_SITE_URL=https://$site_host" \
             --build-arg "NEXT_PUBLIC_API_BASE_URL=https://api.$site_host" \
+            --build-arg "NEXT_PUBLIC_ADSENSE_CLIENT=$adsense_client" \
+            --build-arg "NEXT_PUBLIC_ADSENSE_SLOT=$adsense_slot" \
             -f docker/web.release.Dockerfile \
             -t "anontopic-web:${{ github.event.workflow_run.head_sha }}" \
             --output type=docker,dest=web-image.tar .

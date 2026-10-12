@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 
+import { AdSlot } from "@/components/ad-slot";
 import { SiteChrome } from "@/components/site-chrome";
 import { siteName } from "@/lib/site";
 
@@ -150,6 +151,8 @@ export default function AboutPage() {
           <h2 className="text-2xl font-bold tracking-tight">会話ログの扱い</h2>
           <p className="text-muted mt-6 leading-7">{retention}</p>
         </section>
+
+        <AdSlot className="mt-14" />
 
         <section className="mt-14">
           <h2 className="text-2xl font-bold tracking-tight">よくある質問</h2>

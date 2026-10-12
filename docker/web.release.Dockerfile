@@ -22,6 +22,9 @@ COPY web ./
 
 ARG NEXT_PUBLIC_SITE_URL
 ARG NEXT_PUBLIC_API_BASE_URL
+# AdSense の発行者 ID と広告ユニットの ID。渡さなければ広告を出さないイメージになる（ADR-0038）。
+ARG NEXT_PUBLIC_ADSENSE_CLIENT
+ARG NEXT_PUBLIC_ADSENSE_SLOT
 
 # 未指定のまま通すと localhost を指すバンドルができる。ビルドの時点で止める。
 RUN test -n "$NEXT_PUBLIC_SITE_URL" && test -n "$NEXT_PUBLIC_API_BASE_URL" \

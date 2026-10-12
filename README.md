@@ -351,6 +351,8 @@ APIサーバーの設定は環境変数で行う。
 | `NEXT_PUBLIC_API_BASE_URL` | `http://localhost:8080` | ブラウザから見たAPIのオリジン |
 | `NEXT_PUBLIC_WS_BASE_URL` | `ws://localhost:8080` | ブラウザから見たWebSocketのオリジン |
 | `NEXT_PUBLIC_SITE_URL` | `http://localhost:3000` | 公開時のオリジン。OGP・canonical・`sitemap.xml` の絶対URLに使う |
+| `NEXT_PUBLIC_ADSENSE_CLIENT` | なし | AdSense の発行者 ID（`ca-pub-` で始まる）。未設定なら確認用の meta タグも `ads.txt` も出さない |
+| `NEXT_PUBLIC_ADSENSE_SLOT` | なし | 広告ユニットの ID。発行者 ID と両方あるときだけ広告枠を描く |
 
 `WEB_PORT` を変えたときは、`NEXT_PUBLIC_SITE_URL` とAPI側の `APP_ALLOWED_ORIGINS` も
 同じポートに合わせる。合っていないと、ブラウザからのセッション発行がCORSで止まる。
@@ -358,6 +360,28 @@ APIサーバーの設定は環境変数で行う。
 `NEXT_PUBLIC_` が付く値は `next build` のときに埋め込まれる。本番のイメージ
 （`docker/web.release.Dockerfile`）は環境ごとに `--build-arg` で渡してビルドする。
 手順は [infra/README.md](infra/README.md) にある。
+
+### 広告
+
+広告は Google AdSense の広告ユニットを、トップページと `/about` の本文の途中にだけ置く
+（`web/components/ad-slot.tsx`）。`/waiting` と `/rooms/` には置かない。AdSense の
+スクリプトは広告枠のあるページで、ページの読み込みが終わってから取得する。理由は
+[ADR-0038](docs/adr/0038-show-manual-ad-units-on-the-content-pages-only.md) にある。
+
+広告を出すのは prod だけで、GitHub の Variables の `ADSENSE_CLIENT` と `ADSENSE_SLOT` を
+ビルドのときに渡す。`ADSENSE_CLIENT` だけを登録すると、広告枠は出さずに審査用の meta タグと
+`ads.txt` だけを出す。
+
+AdSense の管理画面では次の 2 つを守る。コードからは強制できない。
+
+- **自動広告を有効にしない。** 有効にすると、トップページから画面を移った先の会話の画面にも
+  広告が差し込まれる。会話の画面への広告はポリシーで禁じられている。
+- **「プライバシーとメッセージ」の欧州の規制に関するメッセージを公開する。** EEA・英国・スイスからの
+  アクセスに Google の同意画面を出す。プライバシーポリシーの「4. 広告の配信と外部への情報の送信」は、
+  これを公開している前提で書いてある。
+
+開発中は `NEXT_PUBLIC_ADSENSE_CLIENT` と `NEXT_PUBLIC_ADSENSE_SLOT` を渡すと広告枠が出る。
+本番ビルド以外ではテスト配信（`data-adtest="on"`）になり、表示もクリックも実績に数えない。
 
 ### スキーマとデータ
 

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 
+import { AdSlot } from "@/components/ad-slot";
 import { SiteChrome } from "@/components/site-chrome";
 import { absoluteUrl, siteDescription, siteName, siteTagline } from "@/lib/site";
 
@@ -136,6 +137,8 @@ export default function HomePage() {
           ))}
         </ol>
       </section>
+
+      <AdSlot className="mx-auto w-full max-w-5xl px-5 pb-16" />
 
       <section className="border-line bg-surface border-y">
         <div className="mx-auto w-full max-w-5xl px-5 py-16">

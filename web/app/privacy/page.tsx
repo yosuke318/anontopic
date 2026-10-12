@@ -4,9 +4,9 @@ import type { Metadata } from "next";
 import { LegalList, LegalSection } from "@/components/legal-section";
 import { SiteChrome } from "@/components/site-chrome";
 import { contactEmail, operatorName, siteName } from "@/lib/site";
-import { termsEffectiveDate } from "@/lib/terms";
+import { privacyRevisedDate, termsEffectiveDate } from "@/lib/terms";
 
-const description = `${siteName} のプライバシーポリシーです。取得する情報、利用の目的、保管する期間、開示の請求への対応を説明します。`;
+const description = `${siteName} のプライバシーポリシーです。取得する情報、利用の目的、保管する期間、広告の配信のために外部に送信される情報、開示の請求への対応を説明します。`;
 
 export const metadata: Metadata = {
   title: "プライバシーポリシー",
@@ -66,7 +66,24 @@ const retention = [
 const processors = [
   "Amazon Web Services（本サービスを動かすサーバーとデータベース。東京リージョン）",
   "Grafana Cloud（サーバーの稼働状況の監視。メッセージの本文、セッションの識別子、IP アドレスは送りません）",
+  "Google AdSense（広告の配信。「4. 広告の配信と外部への情報の送信」を参照）",
 ];
+
+const adTransmission = [
+  {
+    name: "送信される情報",
+    detail:
+      "Cookie などの識別子、IP アドレス、閲覧しているページの URL、ブラウザと端末の種類、広告の表示とクリックの記録",
+  },
+  { name: "送信先", detail: "Google LLC" },
+  {
+    name: "利用の目的",
+    detail:
+      "広告の配信、閲覧の履歴にもとづく広告（パーソナライズ広告）の表示、広告の効果の測定、不正なクリックの検知",
+  },
+];
+
+const externalLinkClassName = "text-foreground underline";
 
 export default function PrivacyPage() {
   return (
@@ -103,7 +120,69 @@ export default function PrivacyPage() {
           <LegalList items={processors} />
         </LegalSection>
 
-        <LegalSection id="disclosure" title="4. 発信者情報の開示の請求と裁判所の命令">
+        <LegalSection id="ads" title="4. 広告の配信と外部への情報の送信">
+          <p>
+            本サービスは、トップページと「サービスについて」のページに、Google LLC
+            が提供する広告配信サービス Google AdSense
+            の広告を表示します。会話の画面と待機画面には広告を表示しません。
+          </p>
+          <p>
+            広告を表示するページを開くと、お使いのブラウザから Google
+            に次の情報が送信されます。運営者はこれらの情報を受け取りません。また、会話のメッセージを
+            Google に提供することはありません。
+          </p>
+          <dl className="space-y-5">
+            {adTransmission.map((item) => (
+              <div key={item.name}>
+                <dt className="text-foreground font-bold">{item.name}</dt>
+                <dd className="mt-1">{item.detail}</dd>
+              </div>
+            ))}
+          </dl>
+          <p>
+            Google を含む第三者配信事業者は Cookie
+            を使い、利用者が本サービスや他のウェブサイトに過去にアクセスした際の情報にもとづいて広告を配信します。Google
+            は広告の Cookie を使うことで、Google
+            とそのパートナーが、本サービスや他のウェブサイトへのアクセスの情報にもとづいた広告を表示できるようにしています。Google
+            による情報の扱いは、
+            <a
+              href="https://policies.google.com/technologies/partner-sites?hl=ja"
+              target="_blank"
+              rel="noopener noreferrer"
+              className={externalLinkClassName}
+            >
+              Google のサービスを使用するサイトやアプリから収集した情報の Google による使用
+            </a>
+            を参照してください。
+          </p>
+          <p>
+            パーソナライズ広告は、Google の
+            <a
+              href="https://adssettings.google.com/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className={externalLinkClassName}
+            >
+              広告設定
+            </a>
+            で無効にできます。第三者配信事業者の Cookie は、
+            <a
+              href="https://optout.aboutads.info/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className={externalLinkClassName}
+            >
+              www.aboutads.info
+            </a>
+            でも無効にできます。ブラウザの設定で Cookie を拒否することもできます。
+          </p>
+          <p>
+            欧州経済領域（EEA）、英国、スイスからアクセスした場合は、Google
+            の同意を求める画面が表示され、広告の Cookie を使うかどうかを選べます。
+          </p>
+        </LegalSection>
+
+        <LegalSection id="disclosure" title="5. 発信者情報の開示の請求と裁判所の命令">
           <p>
             運営者は、情報流通プラットフォーム対処法その他の法令にもとづく発信者情報の開示の請求や、裁判所の命令・捜査機関からの照会に、法令に従って対応します。
           </p>
@@ -114,13 +193,13 @@ export default function PrivacyPage() {
           </p>
         </LegalSection>
 
-        <LegalSection id="requests" title="5. 保有する情報の開示・訂正・利用停止の請求">
+        <LegalSection id="requests" title="6. 保有する情報の開示・訂正・利用停止の請求">
           <p>
             保有する個人データの開示・訂正・利用停止などを求める場合は、下の窓口に連絡してください。本サービスは匿名で利用するもので、運営者は利用者の氏名などを持っていません。そのため、どの記録がご本人のものかを確かめられる範囲で対応します。
           </p>
         </LegalSection>
 
-        <LegalSection id="security" title="6. 安全管理のための措置">
+        <LegalSection id="security" title="7. 安全管理のための措置">
           <LegalList
             items={[
               "ブラウザとの通信と、データベースへの接続は TLS で暗号化します。",
@@ -130,13 +209,13 @@ export default function PrivacyPage() {
           />
         </LegalSection>
 
-        <LegalSection id="changes" title="7. このポリシーの変更">
+        <LegalSection id="changes" title="8. このポリシーの変更">
           <p>
             運営者は、必要に応じてこのポリシーを変更することがあります。変更した場合は、本サービス上に掲示します。
           </p>
         </LegalSection>
 
-        <LegalSection id="contact" title="8. 運営者と窓口">
+        <LegalSection id="contact" title="9. 運営者と窓口">
           <p>
             本サービスは {operatorName}
             が個人で運営しています。運営者の氏名と住所は、求めがあれば遅滞なく回答します。
@@ -154,7 +233,11 @@ export default function PrivacyPage() {
           </p>
         </LegalSection>
 
-        <p className="text-muted mt-16 text-sm">制定日: {termsEffectiveDate}</p>
+        <p className="text-muted mt-16 text-sm">
+          制定日: {termsEffectiveDate}
+          <br />
+          改定日: {privacyRevisedDate}
+        </p>
       </article>
     </SiteChrome>
   );
