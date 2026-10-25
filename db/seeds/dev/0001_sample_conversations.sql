@@ -27,7 +27,7 @@ SELECT
     'reported',
     true
 FROM topics t
-WHERE t.name = '相談'
+WHERE t.name = '映画・ドラマ'
 ON CONFLICT (id) DO NOTHING;
 
 -- 保持期間（90 日）を超えた会話。削除バッチでメッセージが消える。130 日前に置くのは、
