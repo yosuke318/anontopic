@@ -8,6 +8,11 @@ variable "subnet_ids" {
   type        = list(string)
 }
 
+variable "availability_zone" {
+  description = "インスタンスを置く AZ。subnet_ids のいずれかのサブネットがある AZ を指定する。"
+  type        = string
+}
+
 variable "security_group_id" {
   description = "インスタンスに付けるセキュリティグループの ID。"
   type        = string

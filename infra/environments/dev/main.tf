@@ -14,21 +14,21 @@ module "compute" {
   name_prefix           = "${local.project}-${local.env}"
   vpc_id                = module.network.vpc_id
   public_subnet_ids     = module.network.public_subnet_ids
-  private_subnet_ids    = module.network.private_subnet_ids
+  private_subnet_ids    = [module.network.primary_private_subnet_id]
   alb_security_group_id = module.network.alb_security_group_id
   app_security_group_id = module.network.app_security_group_id
   app_port              = local.app_port
 
-  desired_count = 1
+  desired_count = var.load_test ? 2 : 1
 
   # dev は追加開発のときだけ作り、普段は destroy しておく。
   ecr_force_delete = true
   cpu              = 256
   memory           = 512
 
-  environment = local.domain_name == null ? {} : {
+  environment = merge(local.load_test_environment, local.domain_name == null ? {} : {
     APP_ALLOWED_ORIGINS = "https://dev.${local.domain_name}"
-  }
+  })
 
   ssm_parameter_path = "/${local.project}/${local.env}/api"
   secret_names = [
@@ -55,7 +55,7 @@ module "web" {
 
   name_prefix        = "${local.project}-${local.env}"
   vpc_id             = module.network.vpc_id
-  private_subnet_ids = module.network.private_subnet_ids
+  private_subnet_ids = [module.network.primary_private_subnet_id]
   security_group_id  = module.network.web_security_group_id
   port               = local.web_port
 
@@ -80,9 +80,10 @@ module "database" {
 
   name_prefix       = "${local.project}-${local.env}"
   subnet_ids        = module.network.private_subnet_ids
+  availability_zone = module.network.primary_availability_zone
   security_group_id = module.network.database_security_group_id
 
-  instance_class        = "db.t4g.micro"
+  instance_class        = var.load_test ? "db.t4g.small" : "db.t4g.micro"
   max_allocated_storage = 50
   backup_retention_days = 1
 }
@@ -92,6 +93,7 @@ module "cache" {
 
   name_prefix       = "${local.project}-${local.env}"
   subnet_ids        = module.network.private_subnet_ids
+  availability_zone = module.network.primary_availability_zone
   security_group_id = module.network.cache_security_group_id
 
   node_type = "cache.t4g.micro"

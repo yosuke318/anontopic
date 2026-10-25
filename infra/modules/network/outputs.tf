@@ -10,6 +10,16 @@ output "private_subnet_ids" {
   value = aws_subnet.private[*].id
 }
 
+output "primary_availability_zone" {
+  description = "ステートフルなリソース（RDS・ElastiCache）とアプリのタスクを置く AZ。NAT インスタンスと同じ、availability_zones の先頭。"
+  value       = var.availability_zones[0]
+}
+
+output "primary_private_subnet_id" {
+  description = "primary_availability_zone にあるプライベートサブネットの ID。アプリのタスクはここに置く。"
+  value       = aws_subnet.private[0].id
+}
+
 output "alb_security_group_id" {
   value = aws_security_group.alb.id
 }

@@ -25,11 +25,12 @@ function messageForError(error: unknown): string {
   return "サーバーに接続できませんでした。通信状況を確認してください。";
 }
 
-const primaryButtonClass =
-  "bg-brand text-brand-contrast hover:bg-brand-hover inline-flex h-11 items-center justify-center rounded-full px-6 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50";
+// 画面の下に出すシートのボタン。押せる高さを52pxとる。
+const submitButtonClass =
+  "bg-chat-ink text-chat-panel inline-flex min-h-[52px] items-center justify-center rounded-full px-4 text-[15px] font-black disabled:cursor-not-allowed disabled:opacity-50";
 
-const secondaryButtonClass =
-  "border-line hover:bg-surface inline-flex h-11 items-center justify-center rounded-full border px-6 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50";
+const cancelButtonClass =
+  "bg-chat-panel border-chat-line inline-flex min-h-[52px] items-center justify-center rounded-full border-[1.5px] px-4 text-[15px] font-bold disabled:cursor-not-allowed disabled:opacity-50";
 
 export function ReportDialog({
   conversationId,
@@ -80,76 +81,84 @@ export function ReportDialog({
   }
 
   return (
+    // dialogの色は継承されないため、会話画面と同じ配色をここでも指定する。
+    // mt-autoで画面の下に寄せ、上の角だけを丸めてシートにする。並べ方は中の箱に
+    // 任せる。dialog自身をflexにすると、閉じているときのdisplay:noneを打ち消す。
     <dialog
       ref={dialogRef}
       onClose={onClose}
       aria-labelledby="report-dialog-title"
-      className="border-line bg-background text-foreground m-auto w-[min(28rem,calc(100vw-2rem))] rounded-2xl border p-6 backdrop:bg-black/50"
+      className="bg-chat-panel text-chat-ink font-rounded backdrop:bg-chat-ink/50 mx-auto mt-auto w-full max-w-lg max-h-[90dvh] overflow-y-auto rounded-t-[32px] px-5 pt-3 pb-6 leading-[1.8] font-medium"
     >
-      <h2 id="report-dialog-title" className="text-lg font-bold tracking-tight">
-        この会話を通報する
-      </h2>
+      <div className="flex flex-col gap-3.5">
+        <span
+          aria-hidden
+          className="bg-chat-line h-[5px] w-11 flex-none self-center rounded-full"
+        />
 
-      {submitted ? (
-        <>
-          <p className="text-muted mt-4 text-sm leading-7">{done}</p>
-          <div className="mt-6 flex justify-end">
-            <button type="button" onClick={onClose} className={primaryButtonClass}>
+        <h2 id="report-dialog-title" className="text-xl leading-snug font-black">
+          この会話を通報する
+        </h2>
+
+        {submitted ? (
+          <>
+            <p className="text-chat-ink-muted text-[13px] leading-[1.8]">{done}</p>
+            <button type="button" onClick={onClose} className={submitButtonClass}>
               閉じる
             </button>
-          </div>
-        </>
-      ) : (
-        <form onSubmit={handleSubmit}>
-          <p className="text-muted mt-4 text-sm leading-7">{lead}</p>
+          </>
+        ) : (
+          <form onSubmit={handleSubmit} className="flex flex-col gap-3.5">
+            <p className="text-chat-ink-muted text-[13px] leading-[1.8]">{lead}</p>
 
-          <fieldset className="mt-6">
-            <legend className="text-sm font-bold">どれにあてはまりますか</legend>
-            <div className="mt-3 flex flex-col gap-2">
-              {reportReasons.map((option) => (
-                <label
-                  key={option.value}
-                  className={`outline-brand cursor-pointer rounded-xl border px-4 py-3 text-sm transition-colors focus-within:outline-2 focus-within:outline-offset-2 ${
-                    reason === option.value
-                      ? "border-brand bg-brand-soft"
-                      : "border-line hover:bg-surface"
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="reason"
-                    value={option.value}
-                    checked={reason === option.value}
-                    onChange={() => setReason(option.value)}
-                    className="sr-only"
-                  />
-                  {option.label}
-                </label>
-              ))}
+            <fieldset className="m-0 border-0 p-0">
+              <legend className="mb-2 p-0 text-sm font-black">どれにあてはまりますか</legend>
+              <div className="flex flex-col gap-2">
+                {reportReasons.map((option) => (
+                  <label
+                    key={option.value}
+                    className={`focus-within:outline-chat-self flex min-h-[46px] cursor-pointer items-center gap-3 rounded-2xl border-[1.5px] px-4 text-sm focus-within:outline-2 focus-within:outline-offset-2 ${
+                      reason === option.value
+                        ? "border-chat-self bg-chat-alert-soft font-bold"
+                        : "border-chat-option-line bg-chat-panel"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="reason"
+                      value={option.value}
+                      checked={reason === option.value}
+                      onChange={() => setReason(option.value)}
+                      className="accent-chat-self-edge m-0 h-[18px] w-[18px] flex-none"
+                    />
+                    {option.label}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+
+            {error !== null && (
+              <p role="alert" className="text-chat-alert text-[13px] leading-[1.7]">
+                {error}
+              </p>
+            )}
+
+            <div className="mt-1 grid grid-cols-2 gap-2.5">
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={submitting}
+                className={cancelButtonClass}
+              >
+                やめる
+              </button>
+              <button type="submit" disabled={submitting} className={submitButtonClass}>
+                {submitting ? "送信しています…" : "通報する"}
+              </button>
             </div>
-          </fieldset>
-
-          {error !== null && (
-            <p role="alert" className="text-danger mt-4 text-sm leading-6">
-              {error}
-            </p>
-          )}
-
-          <div className="mt-6 flex justify-end gap-3">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={submitting}
-              className={secondaryButtonClass}
-            >
-              やめる
-            </button>
-            <button type="submit" disabled={submitting} className={primaryButtonClass}>
-              {submitting ? "送信しています…" : "通報する"}
-            </button>
-          </div>
-        </form>
-      )}
+          </form>
+        )}
+      </div>
     </dialog>
   );
 }
