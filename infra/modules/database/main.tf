@@ -21,9 +21,12 @@ resource "aws_db_parameter_group" "this" {
   name   = "${var.name_prefix}-postgres18"
   family = "postgres18"
 
+  # 静的なパラメータのため、RDS は再起動で反映する扱いにする。immediate を指定すると
+  # plan のたびに差分が出る。
   parameter {
-    name  = "rds.force_ssl"
-    value = "1"
+    name         = "rds.force_ssl"
+    value        = "1"
+    apply_method = "pending-reboot"
   }
 
   parameter {

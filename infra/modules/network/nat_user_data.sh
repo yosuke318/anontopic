@@ -3,7 +3,18 @@
 # インターフェイスから出るパケットの送信元をこのインスタンスのアドレスに変換する。
 set -euo pipefail
 
+# t4g.nano のメモリでは、起動直後の dnf がリポジトリのメタデータを読む途中で
+# OOM killer に止められる。インストールの間だけスワップファイルを足す。
+fallocate -l 1G /swapfile
+chmod 600 /swapfile
+mkswap /swapfile
+swapon /swapfile
+
 dnf install -y iptables-services
+
+swapoff /swapfile
+rm -f /swapfile
+
 systemctl enable --now iptables
 
 echo "net.ipv4.ip_forward = 1" > /etc/sysctl.d/90-nat.conf
