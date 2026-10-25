@@ -9,7 +9,7 @@ locals {
   origin_id = "alb"
 }
 
-# ホストゾーンはこのモジュールでは作らず、ドメインを取得したときに作られたものを参照する。
+# ホストゾーンはこのモジュールでは作らず、運用者が作ったものを参照する（ADR-0040）。
 data "aws_route53_zone" "this" {
   name         = var.zone_name
   private_zone = false

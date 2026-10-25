@@ -138,7 +138,34 @@ Next.js のフロントエンドは同じクラスターで 1 タスク動かし
 サイトのドメインは prod が `<domain_name>`、dev が `dev.<domain_name>`。`domain_name` が
 未設定の間は、フロントエンドの環境も CloudFront も作らない。
 
-ホストゾーンはこの構成では作らない。ドメインを取得したときに作られたものを参照する。
+ホストゾーンはこの構成では作らない。運用者が作ったものを参照する（下の「ドメインと DNS」）。
+
+### ドメインと DNS
+
+`anonymtopic.com` は Cloudflare Registrar で登録していて、apex の DNS は Cloudflare にある。
+`app.anonymtopic.com` だけを Route 53 に委任し、`domain_name` にはこれを入れる（ADR-0040）。
+
+| | サイト | API |
+| --- | --- | --- |
+| prod | `app.anonymtopic.com` | `api.app.anonymtopic.com` |
+| dev | `dev.app.anonymtopic.com` | `api.dev.app.anonymtopic.com` |
+
+ホストゾーンは dev と prod で共有し、どちらの環境を destroy しても残す。作り直すときは
+次の手順で委任をやり直す。
+
+1. Route 53 にパブリックホストゾーン `app.anonymtopic.com` を作る
+
+   ```bash
+   aws route53 create-hosted-zone --name app.anonymtopic.com --caller-reference "app-anonymtopic-$(date +%s)"
+   ```
+
+2. 出力の `DelegationSet.NameServers` の 4 つを、Cloudflare の DNS に名前 `app`・種別 `NS` の
+   レコードとして 1 つずつ書く。Cloudflare に前のゾーンの NS が残っていれば消す
+3. 委任が効いたことを確かめる
+
+   ```bash
+   dig +short NS app.anonymtopic.com   # Route 53 の 4 つが返る
+   ```
 
 ### 秘密の環境変数
 

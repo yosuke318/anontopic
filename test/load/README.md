@@ -36,7 +36,8 @@ make load-chat CHAT_BASE=https://api.dev.example.com CHAT_USERS=1000 CHAT_STAY=1
 go run ./test/load/chat -h                       # すべてのフラグ
 ```
 
-終わると、各段階を通った人数・失敗の内訳・遅延の分布を出す。
+終わると、各段階を通った人数・失敗の内訳・遅延の分布を出す。これまでの結果は
+[docs/load-test-results.md](../../docs/load-test-results.md) にある。
 
 | 項目 | 意味 |
 | --- | --- |
