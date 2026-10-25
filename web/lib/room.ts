@@ -150,16 +150,16 @@ export function parseRoomEvent(data: string): RoomEvent | null {
 
 const otherParticipantNames = ["A", "B", "C"];
 
-// participantLabelは部屋の中だけで通じる呼び名を返す。参加者は会話ごとの番号でしか
-// 区別できないため、自分以外を番号の昇順に並べて名前を振る。番号は会話が変われば
-// 別の人を指す。
-export function participantLabel(
+// participantIndexは自分以外を番号の昇順に並べたときの位置を返す。呼び名と画面上の
+// 色をこの並びで決めるため、どちらも同じ参加者を指す。自分と、会話にいない番号には
+// -1を返す。
+export function participantIndex(
   participant: number,
   self: number | null,
   roomType: number,
-): string {
+): number {
   if (participant === self) {
-    return "あなた";
+    return -1;
   }
 
   const others: number[] = [];
@@ -169,7 +169,21 @@ export function participantLabel(
     }
   }
 
-  const at = others.indexOf(participant);
+  return others.indexOf(participant);
+}
+
+// participantLabelは部屋の中だけで通じる呼び名を返す。参加者は会話ごとの番号でしか
+// 区別できない。番号は会話が変われば別の人を指す。
+export function participantLabel(
+  participant: number,
+  self: number | null,
+  roomType: number,
+): string {
+  if (participant === self) {
+    return "あなた";
+  }
+
+  const at = participantIndex(participant, self, roomType);
   const name = at < 0 ? undefined : otherParticipantNames[at];
   return name === undefined ? `参加者${participant}` : `参加者${name}`;
 }

@@ -12,6 +12,31 @@
   --brand-soft: #e2f4f1;
   --brand-contrast: #ffffff;
   --danger: #b4231f;
+
+  /* 会話画面の配色。設計がクリーム地の明るい一式だけなので、端末がダークモードでも
+     切り替えない。ここをダークの:rootに書かないことで固定している。 */
+  --chat-bg: #fff8f4;
+  --chat-panel: #ffffff;
+  --chat-ink: #3b2f36;
+  --chat-ink-muted: #74636c;
+  --chat-line: #ead9df;
+  --chat-self: #ff8fab;
+  --chat-self-edge: #e8718f;
+  --chat-alert: #a8274f;
+  --chat-alert-line: #d9466e;
+  --chat-alert-soft: #fff0f3;
+  --chat-online: #3dbe8b;
+  --chat-online-ink: #1f7a5a;
+  --chat-offline: #bdafb6;
+  --chat-moon: #fff3c4;
+
+  /* 自分以外の参加者に振る色。participantIndexの並びと同じ順に使う。 */
+  --chat-peer-1: #9ed9c2;
+  --chat-peer-1-soft: #ddf3ea;
+  --chat-peer-1-tint: #eaf7f1;
+  --chat-peer-2: #c7b9f2;
+  --chat-peer-2-soft: #ece6fa;
+  --chat-peer-2-tint: #f3effc;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -43,10 +68,35 @@
   --color-brand-contrast: var(--brand-contrast);
   --color-danger: var(--danger);
 
+  --color-chat-bg: var(--chat-bg);
+  --color-chat-panel: var(--chat-panel);
+  --color-chat-ink: var(--chat-ink);
+  --color-chat-ink-muted: var(--chat-ink-muted);
+  --color-chat-line: var(--chat-line);
+  --color-chat-self: var(--chat-self);
+  --color-chat-alert: var(--chat-alert);
+  --color-chat-alert-line: var(--chat-alert-line);
+  --color-chat-alert-soft: var(--chat-alert-soft);
+  --color-chat-online: var(--chat-online);
+  --color-chat-online-ink: var(--chat-online-ink);
+  --color-chat-offline: var(--chat-offline);
+  --color-chat-moon: var(--chat-moon);
+  --color-chat-peer-1: var(--chat-peer-1);
+  --color-chat-peer-1-soft: var(--chat-peer-1-soft);
+  --color-chat-peer-1-tint: var(--chat-peer-1-tint);
+  --color-chat-peer-2: var(--chat-peer-2);
+  --color-chat-peer-2-soft: var(--chat-peer-2-soft);
+  --color-chat-peer-2-tint: var(--chat-peer-2-tint);
+
   /* 端末に入っているフォントだけで日本語を組み、Web フォントの転送を避ける。 */
   --font-sans:
     ui-sans-serif, system-ui, -apple-system, "Hiragino Kaku Gothic ProN", "Hiragino Sans",
     "BIZ UDPGothic", Meiryo, sans-serif;
+
+  /* 会話画面の丸ゴシック。入っていない端末では通常のゴシックに落ちる。 */
+  --font-rounded:
+    "Zen Maru Gothic", "Hiragino Maru Gothic ProN", "Hiragino Maru Gothic Pro", "Hiragino Sans",
+    var(--font-sans);
 }
 
 body {
