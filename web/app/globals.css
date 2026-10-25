@@ -20,6 +20,7 @@
   --chat-ink: #3b2f36;
   --chat-ink-muted: #74636c;
   --chat-line: #ead9df;
+  --chat-option-line: #f1e2e7;
   --chat-self: #ff8fab;
   --chat-self-edge: #e8718f;
   --chat-alert: #a8274f;
@@ -73,7 +74,9 @@
   --color-chat-ink: var(--chat-ink);
   --color-chat-ink-muted: var(--chat-ink-muted);
   --color-chat-line: var(--chat-line);
+  --color-chat-option-line: var(--chat-option-line);
   --color-chat-self: var(--chat-self);
+  --color-chat-self-edge: var(--chat-self-edge);
   --color-chat-alert: var(--chat-alert);
   --color-chat-alert-line: var(--chat-alert-line);
   --color-chat-alert-soft: var(--chat-alert-soft);
