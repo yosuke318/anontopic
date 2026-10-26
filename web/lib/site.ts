@@ -1,4 +1,4 @@
-export const siteName = "anontopic";
+export const siteName = "よもやま";
 
 export const siteTagline = "話したいことから始まる匿名チャット";
 
@@ -31,6 +31,6 @@ export function absoluteUrl(path: string): string {
 }
 
 // 運営者は個人で、氏名と住所はページに載せず、求めがあれば回答する（/contact）。
-export const operatorName = `${siteName} 運営者`;
+export const operatorName = `${siteName}運営者`;
 
 export const contactEmail = "contact@example.com";

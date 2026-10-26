@@ -6,7 +6,7 @@ import { SiteChrome } from "@/components/site-chrome";
 import { operatorName, siteName } from "@/lib/site";
 import { termsEffectiveDate } from "@/lib/terms";
 
-const description = `${siteName} の利用規約です。サービスの目的、禁止している行為、利用の制限、会話の記録の扱いを定めています。`;
+const description = `${siteName}の利用規約です。サービスの目的、禁止している行為、利用の制限、会話の記録の扱いを定めています。`;
 
 export const metadata: Metadata = {
   title: "利用規約",

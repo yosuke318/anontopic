@@ -2,7 +2,7 @@ import Link from "next/link";
 
 import { siteName } from "@/lib/site";
 
-const purpose = `${siteName} は、雑談・趣味・相談のための匿名テキストチャットです。出会いや交際を目的とした利用はできません。`;
+const purpose = `${siteName}は、雑談・趣味・相談のための匿名テキストチャットです。出会いや交際を目的とした利用はできません。`;
 
 const links = [
   { href: "/about", label: "サービスについて" },
