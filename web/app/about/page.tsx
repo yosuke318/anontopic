@@ -5,8 +5,7 @@ import { AdSlot } from "@/components/ad-slot";
 import { SiteChrome } from "@/components/site-chrome";
 import { siteName } from "@/lib/site";
 
-const description =
-  "anontopic は、選んだトピックについて匿名でテキストチャットできるサービスです。使い方、ルームの種類、禁止していること、会話ログの扱いを説明します。";
+const description = `${siteName}は、選んだトピックについて匿名でテキストチャットできるサービスです。使い方、ルームの種類、禁止していること、会話ログの扱いを説明します。`;
 
 export const metadata: Metadata = {
   title: "サービスについて",
@@ -19,7 +18,7 @@ export const metadata: Metadata = {
   },
 };
 
-const lead = `${siteName} は、話したい話題を選んで、知らない誰かと匿名でテキストチャットできるサービスです。雑談・趣味・相談のための場所として運営しています。`;
+const lead = `${siteName}は、話したい話題を選んで、知らない誰かと匿名でテキストチャットできるサービスです。雑談・趣味・相談のための場所として運営しています。`;
 
 const capabilities = [
   {
@@ -47,7 +46,7 @@ const rooms = [
   },
 ];
 
-const prohibitedLead = `${siteName} は異性紹介や出会いの仲介を目的としたサービスではありません。次の利用は禁止しています。`;
+const prohibitedLead = `${siteName}は異性紹介や出会いの仲介を目的としたサービスではありません。次の利用は禁止しています。`;
 
 const prohibited = [
   "出会い・交際・性的な関係・対面を目的とした利用",

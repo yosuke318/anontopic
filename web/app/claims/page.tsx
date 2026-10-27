@@ -4,7 +4,7 @@ import { ClaimForm } from "@/components/claim-form";
 import { SiteChrome } from "@/components/site-chrome";
 import { siteName } from "@/lib/site";
 
-const description = `${siteName} の会話の中で、ご自身の権利が侵害されていると考える方からの申し立てを受け付けます。サービスを利用していない方も送信できます。`;
+const description = `${siteName}の会話の中で、ご自身の権利が侵害されていると考える方からの申し立てを受け付けます。サービスを利用していない方も送信できます。`;
 
 export const metadata: Metadata = {
   title: "権利侵害の申し立て",
@@ -17,7 +17,7 @@ export const metadata: Metadata = {
   },
 };
 
-const lead = `${siteName} の会話の中で、プライバシーや名誉などご自身の権利が侵害されていると考える方は、このフォームからお知らせください。サービスを利用していない方も送信できます。`;
+const lead = `${siteName}の会話の中で、プライバシーや名誉などご自身の権利が侵害されていると考える方は、このフォームからお知らせください。サービスを利用していない方も送信できます。`;
 
 const reportInstead =
   "会話に参加している方は、会話画面の「通報」ボタンをお使いください。この会話を運営が確認できるよう、対象の会話と結びつけて受け付けます。";

@@ -5,7 +5,7 @@ import { LegalSection } from "@/components/legal-section";
 import { SiteChrome } from "@/components/site-chrome";
 import { contactEmail, operatorName, siteName } from "@/lib/site";
 
-const description = `${siteName} の運営者情報と、通報・権利侵害の申し立て・お問い合わせの窓口です。`;
+const description = `${siteName}の運営者情報と、通報・権利侵害の申し立て・お問い合わせの窓口です。`;
 
 export const metadata: Metadata = {
   title: "運営者情報・お問い合わせ",

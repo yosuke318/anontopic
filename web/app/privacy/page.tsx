@@ -6,7 +6,7 @@ import { SiteChrome } from "@/components/site-chrome";
 import { contactEmail, operatorName, siteName } from "@/lib/site";
 import { privacyRevisedDate, termsEffectiveDate } from "@/lib/terms";
 
-const description = `${siteName} のプライバシーポリシーです。取得する情報、利用の目的、保管する期間、広告の配信のために外部に送信される情報、開示の請求への対応を説明します。`;
+const description = `${siteName}のプライバシーポリシーです。取得する情報、利用の目的、保管する期間、広告の配信のために外部に送信される情報、開示の請求への対応を説明します。`;
 
 export const metadata: Metadata = {
   title: "プライバシーポリシー",
