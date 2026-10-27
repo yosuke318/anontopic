@@ -120,3 +120,9 @@ variable "api_record_name" {
   type        = string
   default     = "api"
 }
+
+variable "retention_schedule" {
+  description = "retention バッチを起動する時刻（EventBridge Scheduler の cron 式、日本時間）。RDS のバックアップ（03:00 JST から）とメンテナンス（月曜 04:00 JST から）の後に置く。"
+  type        = string
+  default     = "cron(0 5 * * ? *)"
+}

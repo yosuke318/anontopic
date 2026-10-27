@@ -129,7 +129,7 @@ variable "redis_memory_threshold" {
 # --- retention バッチ ---
 
 variable "retention_log_group_name" {
-  description = "retention バッチのログを受けるロググループの名前。指定すると、バッチが失敗したとき（ログのメッセージが \"retention failed\"）に通知する。null のときは作らない。"
+  description = "retention バッチのログを受けるロググループの名前。指定すると、バッチが失敗したとき（ログのメッセージが \"retention failed\"）と、24 時間終わらなかったとき（\"retention finished\" が出ない）に通知する。null のときは作らない。"
   type        = string
   default     = null
 }

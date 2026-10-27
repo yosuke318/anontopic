@@ -330,14 +330,15 @@ RDS PostgreSQL と ElastiCache Redis は、どちらも Single-AZ の 1 台で�
 マスターユーザーのパスワードは RDS が Secrets Manager に持ち、定期的にローテーションされる。
 アプリはマスターユーザーを使わず、運用者が作るロール `anontopic_app` で接続する（ADR-0032）。
 RDS はプライベートサブネットにあるため、NAT インスタンスへの Session Manager の
-ポートフォワードで入る。手元に Session Manager プラグインが要る。
+ポートフォワードで入る。手元に Session Manager プラグインが要る。手元のポートは、`make up` の
+PostgreSQL（5432）とぶつからない 25432 を使う。
 
 ```bash
 tf="terraform -chdir=infra/environments/dev"
 
 aws ssm start-session --target "$($tf output -raw nat_instance_id)" \
   --document-name AWS-StartPortForwardingSessionToRemoteHost \
-  --parameters "host=$($tf output -raw database_address),portNumber=5432,localPortNumber=15432"
+  --parameters "host=$($tf output -raw database_address),portNumber=5432,localPortNumber=25432"
 ```
 
 別のターミナルで、マスターユーザーとしてロールを作り、データベースの所有者にする。
@@ -349,7 +350,7 @@ master_password="$(aws secretsmanager get-secret-value \
   --query SecretString --output text | jq -r .password)"
 app_password="$(openssl rand -hex 32)"
 
-PGPASSWORD="$master_password" psql "host=localhost port=15432 dbname=anontopic user=anontopic_admin sslmode=require" <<SQL
+PGPASSWORD="$master_password" psql "host=127.0.0.1 port=25432 dbname=anontopic user=anontopic_admin sslmode=require" <<SQL
 CREATE ROLE anontopic_app LOGIN PASSWORD '$app_password';
 GRANT anontopic_app TO CURRENT_USER;
 ALTER DATABASE anontopic OWNER TO anontopic_app;
@@ -359,7 +360,7 @@ SQL
 同じシェルで、アプリのロールでマイグレーションを流し、接続 URL を SSM に入れる。
 
 ```bash
-DATABASE_URL="postgres://anontopic_app:$app_password@localhost:15432/anontopic?sslmode=require" \
+DATABASE_URL="postgres://anontopic_app:$app_password@127.0.0.1:25432/anontopic?sslmode=require" \
   go run ./cmd/migrate up
 
 aws ssm put-parameter --type SecureString --overwrite \
@@ -370,6 +371,31 @@ aws ssm put-parameter --type SecureString --overwrite \
   --name /anontopic/dev/api/REDIS_URL \
   --value "rediss://$($tf output -raw redis_address):6379"
 ```
+
+### retention バッチ
+
+会話ログの削除とメッセージのパーティションの作成（`cmd/retention`、ADR-0026）は、
+EventBridge Scheduler が毎日 05:00（日本時間）に ECS のタスクとして動かす（ADR-0041）。
+タスク定義は API のファミリーの最新のリビジョンで、コマンドだけを `/retention` に替える。
+デプロイで新しいイメージを入れれば、次の実行からそのイメージで動く。
+
+ログは API と同じ `/ecs/anontopic-<env>-api` に出る。retention のタスクは `started-by` が
+`scheduler-retention` になる。
+
+手で動かすときは、Scheduler と同じ要求を `run-task` で送る。`-dry-run` を付けると、作る
+パーティションと消すパーティションを出すだけで、何も変えない。
+
+```bash
+env=dev
+network="$(aws ecs describe-services --cluster anontopic-$env --services anontopic-$env-api \
+  --query 'services[0].networkConfiguration' --output json)"
+
+aws ecs run-task --cluster anontopic-$env --task-definition anontopic-$env-api \
+  --launch-type FARGATE --network-configuration "$network" --started-by manual-retention \
+  --overrides '{"containerOverrides":[{"name":"api","command":["/retention","-dry-run"]}]}'
+```
+
+本番の削除を流すときは、`command` を `["/retention"]` にする。
 
 ## 監視と予算
 
@@ -394,6 +420,8 @@ GitHub のシークレット `ALARM_EMAIL` にも同じ値を登録する。初�
 | `anontopic-prod-db-connections` | RDS への接続数が 50 を超える |
 | `anontopic-prod-redis-memory` | Redis のメモリ使用率が 80% を超える |
 | `anontopic-prod-nat-status-check` | NAT インスタンスのステータスチェックが 2 分続けて失敗する |
+| `anontopic-prod-retention-failed` | retention バッチが `retention failed` のログを出した |
+| `anontopic-prod-retention-not-finished` | retention バッチの `retention finished` のログが 24 時間出ない |
 
 `api` の ALB の 2 つと `web` の 4 つは、`domain_name` を設定してから作られる。ALB 自身が返す
 5xx はターゲットグループごとに分かれないため、フロントエンドへの要求の分も `api-5xx` に入る。

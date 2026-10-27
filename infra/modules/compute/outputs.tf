@@ -51,3 +51,12 @@ output "https_listener_arn" {
   description = "ALB の HTTPS リスナーの ARN。zone_name が null のときは null。"
   value       = one(aws_lb_listener.https[*].arn)
 }
+
+output "log_group_name" {
+  description = "API のロググループ。retention バッチも同じタスク定義で動くため、そのログもここに出る。"
+  value       = aws_cloudwatch_log_group.api.name
+}
+
+output "retention_schedule_name" {
+  value = aws_scheduler_schedule.retention.name
+}
