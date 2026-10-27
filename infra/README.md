@@ -331,7 +331,7 @@ RDS PostgreSQL と ElastiCache Redis は、どちらも Single-AZ の 1 台で�
 アプリはマスターユーザーを使わず、運用者が作るロール `anontopic_app` で接続する（ADR-0032）。
 RDS はプライベートサブネットにあるため、NAT インスタンスへの Session Manager の
 ポートフォワードで入る。手元に Session Manager プラグインが要る。手元のポートは、`make up` の
-PostgreSQL（15432）とぶつからない 25432 を使う。
+PostgreSQL（5432）とぶつからない 25432 を使う。
 
 ```bash
 tf="terraform -chdir=infra/environments/dev"
