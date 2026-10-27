@@ -335,3 +335,40 @@ resource "aws_cloudwatch_metric_alarm" "retention_failed" {
 
   alarm_actions = local.alarm_actions
 }
+
+# 「retention finished」が 24 時間出なければ、起動できなかったか途中で止まった。失敗のログが
+# 出ないまま止まる場合（タスクの起動の失敗、Scheduler の失敗）もここで気づく。
+resource "aws_cloudwatch_log_metric_filter" "retention_finished" {
+  count = var.retention_log_group_name == null ? 0 : 1
+
+  name           = "${var.name_prefix}-retention-finished"
+  log_group_name = var.retention_log_group_name
+  pattern        = "{ $.msg = \"retention finished\" }"
+
+  metric_transformation {
+    namespace = "anontopic/retention"
+    name      = "${var.name_prefix}-retention-finished"
+    value     = "1"
+    unit      = "Count"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "retention_not_finished" {
+  count = var.retention_log_group_name == null ? 0 : 1
+
+  alarm_name        = "${var.name_prefix}-retention-not-finished"
+  alarm_description = "retention バッチが 24 時間終わっていない。起動に失敗したか、途中で止まった。"
+
+  namespace          = aws_cloudwatch_log_metric_filter.retention_finished[0].metric_transformation[0].namespace
+  metric_name        = aws_cloudwatch_log_metric_filter.retention_finished[0].metric_transformation[0].name
+  statistic          = "Sum"
+  period             = 3600
+  evaluation_periods = 24
+  # 1 時間ごとの 24 個がすべて 0 件（ログが出ない時間はデータが無い）なら鳴らす。
+  comparison_operator = "LessThanThreshold"
+  threshold           = 1
+  treat_missing_data  = "breaching"
+
+  alarm_actions = local.alarm_actions
+  ok_actions    = local.alarm_actions
+}

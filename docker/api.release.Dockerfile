@@ -18,16 +18,17 @@ COPY internal ./internal
 COPY db ./db
 
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
-    go build -trimpath -ldflags="-s -w" -o /out/ ./cmd/server ./cmd/migrate
+    go build -trimpath -ldflags="-s -w" -o /out/ ./cmd/server ./cmd/migrate ./cmd/retention
 
 # The static distroless image carries CA certificates and tzdata, and runs as
 # an unprivileged user. It has no shell.
 FROM gcr.io/distroless/static-debian12:nonroot
 
-COPY --from=build /out/server /out/migrate /
+COPY --from=build /out/server /out/migrate /out/retention /
 
 EXPOSE 8080
 
 # ECS の RunTask で上書きできるのは CMD だけのため、ENTRYPOINT は使わない。
-# デプロイはマイグレーションを command ["/migrate", "up"] で流す。
+# デプロイはマイグレーションを command ["/migrate", "up"] で流し、EventBridge Scheduler は
+# retention バッチを command ["/retention"] で動かす。
 CMD ["/server"]
