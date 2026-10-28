@@ -141,12 +141,15 @@ type fakeStore struct {
 	mu       sync.Mutex
 	subs     map[string][]*fakeSubscription
 	presence map[string]map[string]time.Time
+	// topics holds the topic each conversation was recorded under.
+	topics map[string]int
 }
 
 func newFakeStore() *fakeStore {
 	return &fakeStore{
 		subs:     make(map[string][]*fakeSubscription),
 		presence: make(map[string]map[string]time.Time),
+		topics:   make(map[string]int),
 	}
 }
 
@@ -175,34 +178,57 @@ func (s *fakeStore) Subscribe(_ context.Context, conversationID string) (Subscri
 	return sub, nil
 }
 
-func (s *fakeStore) Join(_ context.Context, conversationID, token string, now time.Time, ttl time.Duration) ([]string, error) {
-	return s.record(conversationID, token, now, ttl, true), nil
+func (s *fakeStore) Join(_ context.Context, seat Seat, now time.Time, ttl time.Duration) ([]string, error) {
+	return s.record(seat, now, ttl, true), nil
 }
 
-func (s *fakeStore) Heartbeat(_ context.Context, conversationID, token string, now time.Time, ttl time.Duration) ([]string, error) {
-	return s.record(conversationID, token, now, ttl, true), nil
+func (s *fakeStore) Heartbeat(_ context.Context, seat Seat, now time.Time, ttl time.Duration) ([]string, error) {
+	return s.record(seat, now, ttl, true), nil
 }
 
-func (s *fakeStore) Leave(_ context.Context, conversationID, token string, now time.Time, ttl time.Duration) ([]string, error) {
-	return s.record(conversationID, token, now, ttl, false), nil
+func (s *fakeStore) Leave(_ context.Context, seat Seat, now time.Time, ttl time.Duration) ([]string, error) {
+	return s.record(seat, now, ttl, false), nil
+}
+
+func (s *fakeStore) CountConnected(_ context.Context, topicIDs []int, now time.Time, ttl time.Duration) (map[int]int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	counts := make(map[int]int, len(topicIDs))
+	for _, id := range topicIDs {
+		counts[id] = 0
+	}
+	for conversationID, room := range s.presence {
+		topicID := s.topics[conversationID]
+		if _, ok := counts[topicID]; !ok {
+			continue
+		}
+		for _, at := range room {
+			if now.Sub(at) < ttl {
+				counts[topicID]++
+			}
+		}
+	}
+	return counts, nil
 }
 
 // record keeps one token connected or drops it, and answers with the tokens
 // whose entry is still fresh.
-func (s *fakeStore) record(conversationID, token string, now time.Time, ttl time.Duration, connected bool) []string {
+func (s *fakeStore) record(seat Seat, now time.Time, ttl time.Duration, connected bool) []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	room, ok := s.presence[conversationID]
+	s.topics[seat.ConversationID] = seat.TopicID
+	room, ok := s.presence[seat.ConversationID]
 	if !ok {
 		room = make(map[string]time.Time)
-		s.presence[conversationID] = room
+		s.presence[seat.ConversationID] = room
 	}
 
 	if connected {
-		room[token] = now
+		room[seat.Token] = now
 	} else {
-		delete(room, token)
+		delete(room, seat.Token)
 	}
 
 	tokens := make([]string, 0, len(room))

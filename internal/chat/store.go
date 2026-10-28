@@ -21,20 +21,34 @@ type Store interface {
 	// returned Subscription is closed.
 	Subscribe(ctx context.Context, conversationID string) (Subscription, error)
 
-	// Join records token as connected to conversationID for ttl and returns
-	// every token connected to it. A token that connects again keeps one
-	// entry, so that a reconnection does not make the room look fuller.
-	Join(ctx context.Context, conversationID, token string, now time.Time, ttl time.Duration) ([]string, error)
+	// Join records token as connected to the conversation of seat for ttl and
+	// returns every token connected to it. A token that connects again keeps
+	// one entry, so that a reconnection does not make the room look fuller.
+	Join(ctx context.Context, seat Seat, now time.Time, ttl time.Duration) ([]string, error)
 
 	// Heartbeat keeps token connected for another ttl and returns every token
-	// connected to conversationID. A token that has not been kept within the
-	// last ttl is dropped, an entry exactly that old included, which is what a
-	// server that died leaves behind.
-	Heartbeat(ctx context.Context, conversationID, token string, now time.Time, ttl time.Duration) ([]string, error)
+	// connected to the conversation of seat. A token that has not been kept
+	// within the last ttl is dropped, an entry exactly that old included,
+	// which is what a server that died leaves behind.
+	Heartbeat(ctx context.Context, seat Seat, now time.Time, ttl time.Duration) ([]string, error)
 
-	// Leave drops token from the participants connected to conversationID
-	// and returns the tokens that still are.
-	Leave(ctx context.Context, conversationID, token string, now time.Time, ttl time.Duration) ([]string, error)
+	// Leave drops the token of seat from the participants connected to its
+	// conversation and returns the tokens that still are.
+	Leave(ctx context.Context, seat Seat, now time.Time, ttl time.Duration) ([]string, error)
+
+	// CountConnected returns how many participants are connected to the
+	// conversations of each topic in topicIDs. What Join and Heartbeat record
+	// is counted for ttl, the same lifetime a room counts it for. A topic
+	// nobody is connected to answers zero.
+	CountConnected(ctx context.Context, topicIDs []int, now time.Time, ttl time.Duration) (map[int]int, error)
+}
+
+// Seat is the place one participant's connection takes: the conversation and
+// the topic it is held under, and the participant's session token.
+type Seat struct {
+	ConversationID string
+	TopicID        int
+	Token          string
 }
 
 // Subscription is the stream of one room's events as one server sees them.

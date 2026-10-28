@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"sync"
@@ -150,6 +151,21 @@ func (s *fakeStore) Remove(_ context.Context, token string) error {
 	s.queues[q] = slices.DeleteFunc(s.queues[q], func(e entry) bool { return e.token == token })
 	delete(s.waiting, token)
 	return nil
+}
+
+func (s *fakeStore) CountWaiting(_ context.Context, queues []Queue, now time.Time, ttl time.Duration) (map[Queue]int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	counts := make(map[Queue]int, len(queues))
+	for _, q := range queues {
+		for _, e := range s.queues[q] {
+			if now.Sub(e.since) < ttl {
+				counts[q]++
+			}
+		}
+	}
+	return counts, nil
 }
 
 // queueOf is the queue a waiting token sits in.
@@ -609,5 +625,34 @@ func TestARoomRecordsTheIdentifiersOfItsParticipants(t *testing.T) {
 	}
 	if got := repo.participants[state.Conversation.ID]; !slices.Equal(got, want) {
 		t.Fatalf("participants = %+v, want %+v", got, want)
+	}
+}
+
+func TestWaitingByTopicCountsTheUsersOfBothRoomTypes(t *testing.T) {
+	svc, clock := newTestService(t, newFakeStore(), newFakeRepository())
+
+	join(t, svc, "alice", Queue{TopicID: 1, RoomType: 2})
+	join(t, svc, "bob", Queue{TopicID: 1, RoomType: 3})
+	join(t, svc, "carol", Queue{TopicID: 2, RoomType: 3})
+
+	counts, err := svc.WaitingByTopic(context.Background(), []int{1, 2, 3})
+	if err != nil {
+		t.Fatalf("WaitingByTopic: %v", err)
+	}
+	want := map[int]int{1: 2, 2: 1, 3: 0}
+	if !maps.Equal(counts, want) {
+		t.Fatalf("counts = %v, want %v", counts, want)
+	}
+
+	// A user whose wait ran out is not counted, even before a room is formed
+	// out of the queue.
+	clock.Advance(DefaultWaitTTL)
+	counts, err = svc.WaitingByTopic(context.Background(), []int{1, 2})
+	if err != nil {
+		t.Fatalf("WaitingByTopic: %v", err)
+	}
+	want = map[int]int{1: 0, 2: 0}
+	if !maps.Equal(counts, want) {
+		t.Fatalf("counts after the wait = %v, want %v", counts, want)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"math/rand/v2"
 	"os"
 	"slices"
@@ -382,5 +383,27 @@ func TestConcurrentFormRoomGivesEachUserOneRoom(t *testing.T) {
 	}
 	if len(seen) != users {
 		t.Fatalf("users in a room = %d, want %d", len(seen), users)
+	}
+}
+
+func TestCountWaitingLeavesOutTheUsersWhoseWaitRanOut(t *testing.T) {
+	store := redisTestStore(t)
+	two := testQueue(t, store, 2)
+	three := testQueue(t, store, 3)
+	empty := testQueue(t, store, 2)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	ttl := time.Minute
+
+	enqueue(t, store, testToken(t, store, "alice"), two, now.Add(-ttl))
+	enqueue(t, store, testToken(t, store, "bob"), two, now.Add(-time.Second))
+	enqueue(t, store, testToken(t, store, "carol"), three, now)
+
+	counts, err := store.CountWaiting(context.Background(), []Queue{two, three, empty}, now, ttl)
+	if err != nil {
+		t.Fatalf("CountWaiting: %v", err)
+	}
+	want := map[Queue]int{two: 1, three: 1, empty: 0}
+	if !maps.Equal(counts, want) {
+		t.Fatalf("counts = %v, want %v", counts, want)
 	}
 }

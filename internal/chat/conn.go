@@ -55,6 +55,11 @@ func newConn(svc *Service, ws *websocket.Conn, adm Admission) *conn {
 	}
 }
 
+// seat is the place this connection takes in its conversation.
+func (c *conn) seat() Seat {
+	return Seat{ConversationID: c.conversationID, TopicID: c.conversation.TopicID, Token: c.token}
+}
+
 // close ends the connection. Closing the socket is what stops readLoop, which
 // blocks until the client or the server hangs up.
 func (c *conn) close() {
@@ -161,7 +166,7 @@ func (c *conn) heartbeatLoop(ctx context.Context) {
 
 			now := c.svc.now().UTC()
 
-			connected, err := c.svc.store.Heartbeat(ctx, c.conversationID, c.token, now, c.svc.presenceTTL)
+			connected, err := c.svc.store.Heartbeat(ctx, c.seat(), now, c.svc.presenceTTL)
 			if err != nil {
 				slog.Error("keep the participant connected",
 					slog.String("conversation_id", c.conversationID), slog.Any("error", err))

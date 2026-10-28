@@ -298,6 +298,28 @@ func waitingState(fields map[string]string) (State, error) {
 	return State{Kind: StateWaiting, Queue: q, WaitingSince: since}, nil
 }
 
+// CountWaiting counts the users of each queue whose wait started less than ttl
+// ago. A user exactly ttl into their wait is left out, as formRoomScript
+// drops them.
+func (s *RedisStore) CountWaiting(ctx context.Context, queues []Queue, now time.Time, ttl time.Duration) (map[Queue]int, error) {
+	freshAfter := "(" + strconv.FormatInt(now.Add(-ttl).UnixMilli(), 10)
+
+	pipe := s.client.Pipeline()
+	cmds := make([]*redis.IntCmd, len(queues))
+	for i, q := range queues {
+		cmds[i] = pipe.ZCount(ctx, queueKey(q), freshAfter, "+inf")
+	}
+	if _, err := pipe.Exec(ctx); err != nil {
+		return nil, fmt.Errorf("count the users waiting in the queues: %w", err)
+	}
+
+	counts := make(map[Queue]int, len(queues))
+	for i, q := range queues {
+		counts[q] = int(cmds[i].Val())
+	}
+	return counts, nil
+}
+
 // queueOf reads the fields both a waiting key and a room key carry.
 func queueOf(fields map[string]string) (Queue, time.Time, error) {
 	topicID, err := strconv.Atoi(fields[fieldTopicID])

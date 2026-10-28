@@ -126,7 +126,7 @@ func run() error {
 	mux.HandleFunc("GET /readyz", handleReady(pool, rdb))
 	session.NewHandler(sessions).Register(mux)
 	chat.NewHandler(chats, sessions, limits, allowedOrigins).Register(mux)
-	topic.NewHandler(topics, adminToken).Register(mux)
+	topic.NewHandler(topics, adminToken, topicPresence{chats, matches}).Register(mux)
 	matching.NewHandler(matches, sessions).Register(mux)
 	report.NewHandler(reports, sessions, limits, adminToken).Register(mux)
 
@@ -312,6 +312,31 @@ func (m moderator) Moderate(ctx context.Context, body string) (chat.Verdict, err
 	}
 
 	return chat.Verdict{Decision: chat.DecisionAllow}, nil
+}
+
+// topicPresence counts the users under each topic out of the modules that
+// hold them: the chat module knows who is connected to a conversation, and
+// the matching module who waits for one.
+type topicPresence struct {
+	chats   *chat.Service
+	matches *matching.Service
+}
+
+func (p topicPresence) Count(ctx context.Context, topicIDs []int) (map[int]topic.Presence, error) {
+	connected, err := p.chats.ConnectedByTopic(ctx, topicIDs)
+	if err != nil {
+		return nil, err
+	}
+	waiting, err := p.matches.WaitingByTopic(ctx, topicIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	counts := make(map[int]topic.Presence, len(topicIDs))
+	for _, id := range topicIDs {
+		counts[id] = topic.Presence{Connected: connected[id], Waiting: waiting[id]}
+	}
+	return counts, nil
 }
 
 // reportedConversations carries what the report module asks about a

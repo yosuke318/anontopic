@@ -268,6 +268,11 @@ type Admission struct {
 	Identity Identity
 }
 
+// seat is the place the admitted participant takes in their conversation.
+func (a Admission) seat() Seat {
+	return Seat{ConversationID: a.Conversation.ID, TopicID: a.Conversation.TopicID, Token: a.Token}
+}
+
 // Service admits participants to a conversation and carries what they send.
 type Service struct {
 	repo      Repository
@@ -378,6 +383,14 @@ func (s *Service) Admit(ctx context.Context, conversationID, token string, id Id
 	return Admission{Conversation: conv, Token: token, Participant: at + 1, Identity: id}, nil
 }
 
+// ConnectedByTopic returns how many participants are connected to the
+// conversations of each topic in topicIDs, counted the way a room counts its
+// own: a connection whose server stopped recording it is left out once
+// PresenceTTL has passed.
+func (s *Service) ConnectedByTopic(ctx context.Context, topicIDs []int) (map[int]int, error) {
+	return s.store.CountConnected(ctx, topicIDs, s.now().UTC(), s.presenceTTL)
+}
+
 // IsParticipant reports whether token belongs to a participant of the
 // conversation. A conversation that is over answers as well, so that what
 // happened in a room can still be acted on once it closed. An id no
@@ -421,7 +434,7 @@ func (s *Service) Serve(ctx context.Context, ws *websocket.Conn, adm Admission) 
 	}
 	defer s.depart(ctx, c)
 
-	connected, err := s.store.Join(ctx, adm.Conversation.ID, adm.Token, s.now().UTC(), s.presenceTTL)
+	connected, err := s.store.Join(ctx, adm.seat(), s.now().UTC(), s.presenceTTL)
 	if err != nil {
 		slog.Error("record arrival",
 			slog.String("conversation_id", adm.Conversation.ID), slog.Any("error", err))
@@ -451,8 +464,18 @@ func (s *Service) Serve(ctx context.Context, ws *websocket.Conn, adm Admission) 
 	// for being reported, is shown when they next enter a room.
 	s.showWarning(ctx, c)
 
-	go c.heartbeatLoop(ctx)
+	beating := make(chan struct{})
+	go func() {
+		defer close(beating)
+		c.heartbeatLoop(ctx)
+	}()
 	c.readLoop(ctx)
+
+	// The heartbeat is stopped before the departure is recorded, so that one
+	// still being written cannot record the participant as connected again
+	// once they are gone.
+	c.close()
+	<-beating
 }
 
 // depart records that a connection is gone and tells the room. A conversation
@@ -464,7 +487,7 @@ func (s *Service) depart(ctx context.Context, c *conn) {
 
 	s.hub.detach(c.conversationID, c)
 
-	connected, err := s.store.Leave(ctx, c.conversationID, c.token, s.now().UTC(), s.presenceTTL)
+	connected, err := s.store.Leave(ctx, c.seat(), s.now().UTC(), s.presenceTTL)
 	if err != nil {
 		slog.Error("record departure",
 			slog.String("conversation_id", c.conversationID), slog.Any("error", err))

@@ -1,6 +1,7 @@
 package topic
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -15,17 +16,37 @@ import (
 // a flag.
 const maxRequestBytes = 4 << 10
 
+// Presence is how many users are under one topic at a moment.
+type Presence struct {
+	// Connected is the number of participants connected to a conversation
+	// of the topic.
+	Connected int
+	// Waiting is the number of users waiting in a queue of the topic.
+	Waiting int
+}
+
+// PresenceCounter counts the users under each topic. The chat and matching
+// modules hold who is connected and who waits, so this module only asks.
+type PresenceCounter interface {
+	// Count answers for every topic in topicIDs, with zero for a topic
+	// nobody is under.
+	Count(ctx context.Context, topicIDs []int) (map[int]Presence, error)
+}
+
 // Handler exposes the topic module's HTTP surface.
 type Handler struct {
-	svc   *Service
-	admin adminauth.Guard
+	svc      *Service
+	admin    adminauth.Guard
+	presence PresenceCounter
+	now      func() time.Time
 }
 
 // NewHandler builds a handler around svc. adminToken is the secret the
 // administration endpoints require; when it is empty they are not served at
-// all, so a deployment without a secret has no write surface.
-func NewHandler(svc *Service, adminToken string) *Handler {
-	return &Handler{svc: svc, admin: adminauth.New(adminToken)}
+// all, so a deployment without a secret has no write surface. presence
+// answers the count of users under each topic.
+func NewHandler(svc *Service, adminToken string, presence PresenceCounter) *Handler {
+	return &Handler{svc: svc, admin: adminauth.New(adminToken), presence: presence, now: time.Now}
 }
 
 // Register mounts the module's routes onto mux.
@@ -40,6 +61,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /api/admin/topics", h.admin.Require(http.HandlerFunc(h.handleCreate)))
 	mux.Handle("PATCH /api/admin/topics/{id}", h.admin.Require(http.HandlerFunc(h.handleUpdate)))
 	mux.Handle("DELETE /api/admin/topics/{id}", h.admin.Require(http.HandlerFunc(h.handleDelete)))
+	mux.Handle("GET /api/admin/topics/presence", h.admin.Require(http.HandlerFunc(h.handlePresence)))
 }
 
 // topicResponse is what the selection screen needs to draw one choice.
@@ -65,6 +87,20 @@ type adminTopicResponse struct {
 // adminListResponse holds every topic, whether active or not.
 type adminListResponse struct {
 	Topics []adminTopicResponse `json:"topics"`
+}
+
+// presenceResponse is how many users are under one topic.
+type presenceResponse struct {
+	ID        int `json:"id"`
+	Connected int `json:"connected"`
+	Waiting   int `json:"waiting"`
+}
+
+// presenceListResponse holds the count of every topic, whether active or not,
+// and when it was taken.
+type presenceListResponse struct {
+	CountedAt time.Time          `json:"counted_at"`
+	Topics    []presenceResponse `json:"topics"`
 }
 
 // createRequest is the body of a topic creation.
@@ -109,6 +145,39 @@ func (h *Handler) handleAdminList(w http.ResponseWriter, r *http.Request) {
 	body := adminListResponse{Topics: make([]adminTopicResponse, 0, len(topics))}
 	for _, t := range topics {
 		body.Topics = append(body.Topics, adminTopicResponse(t))
+	}
+
+	writeJSON(w, http.StatusOK, body)
+}
+
+// handlePresence answers with how many users are under each topic. An
+// inactive topic is counted as well, because the conversations already held
+// under it go on.
+func (h *Handler) handlePresence(w http.ResponseWriter, r *http.Request) {
+	topics, err := h.svc.List(r.Context())
+	if err != nil {
+		slog.Error("list topics", slog.Any("error", err))
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	ids := make([]int, 0, len(topics))
+	for _, t := range topics {
+		ids = append(ids, t.ID)
+	}
+
+	countedAt := h.now().UTC()
+	counts, err := h.presence.Count(r.Context(), ids)
+	if err != nil {
+		slog.Error("count the users under the topics", slog.Any("error", err))
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	body := presenceListResponse{CountedAt: countedAt, Topics: make([]presenceResponse, 0, len(ids))}
+	for _, id := range ids {
+		p := counts[id]
+		body.Topics = append(body.Topics, presenceResponse{ID: id, Connected: p.Connected, Waiting: p.Waiting})
 	}
 
 	writeJSON(w, http.StatusOK, body)
