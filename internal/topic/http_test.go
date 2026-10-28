@@ -1,9 +1,12 @@
 package topic
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -17,11 +20,42 @@ const testAdminToken = "test-admin-token"
 func newTestMux(t *testing.T, repo *fakeRepository, adminToken string) *http.ServeMux {
 	t.Helper()
 
+	return newTestMuxCounting(t, repo, adminToken, stubPresence{})
+}
+
+// newTestMuxCounting serves the module with presence answering the count of
+// users under each topic.
+func newTestMuxCounting(t *testing.T, repo *fakeRepository, adminToken string, presence PresenceCounter) *http.ServeMux {
+	t.Helper()
+
 	svc, _ := newTestService(t, repo)
 	mux := http.NewServeMux()
-	NewHandler(svc, adminToken).Register(mux)
+	NewHandler(svc, adminToken, presence).Register(mux)
 
 	return mux
+}
+
+// stubPresence answers the counts it holds, and zero for any other topic.
+type stubPresence struct {
+	counts map[int]Presence
+	err    error
+	// asked records the topics the handler asked about.
+	asked *[]int
+}
+
+func (p stubPresence) Count(_ context.Context, topicIDs []int) (map[int]Presence, error) {
+	if p.asked != nil {
+		*p.asked = slices.Clone(topicIDs)
+	}
+	if p.err != nil {
+		return nil, p.err
+	}
+
+	counts := make(map[int]Presence, len(topicIDs))
+	for _, id := range topicIDs {
+		counts[id] = p.counts[id]
+	}
+	return counts, nil
 }
 
 // do sends a request to mux and returns the recorded answer.
@@ -95,6 +129,7 @@ func TestAdminEndpointsRejectRequestsWithoutTheToken(t *testing.T) {
 		body   string
 	}{
 		{http.MethodGet, "/api/admin/topics", ""},
+		{http.MethodGet, "/api/admin/topics/presence", ""},
 		{http.MethodPost, "/api/admin/topics", `{"name":"ゲーム"}`},
 		{http.MethodPatch, "/api/admin/topics/1", `{"is_active":false}`},
 		{http.MethodDelete, "/api/admin/topics/1", ""},
@@ -241,5 +276,48 @@ func TestEndpointsRejectAnIDThatIsNotANumber(t *testing.T) {
 	rec := do(mux, http.MethodDelete, "/api/admin/topics/abc", "", true)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestPresenceEndpointCountsEveryTopic(t *testing.T) {
+	repo := newFakeRepository("雑談", "趣味", "相談")
+	repo.topics[1].IsActive = false
+	var asked []int
+	presence := stubPresence{
+		counts: map[int]Presence{1: {Connected: 3, Waiting: 1}, 2: {Connected: 2}},
+		asked:  &asked,
+	}
+	mux := newTestMuxCounting(t, repo, testAdminToken, presence)
+
+	rec := do(mux, http.MethodGet, "/api/admin/topics/presence", "", true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	// The inactive topic is asked about too: its conversations go on.
+	if !slices.Equal(asked, []int{1, 2, 3}) {
+		t.Fatalf("asked about %v, want every topic", asked)
+	}
+
+	body := decodeBody[presenceListResponse](t, rec)
+	want := []presenceResponse{
+		{ID: 1, Connected: 3, Waiting: 1},
+		{ID: 2, Connected: 2},
+		{ID: 3},
+	}
+	if !slices.Equal(body.Topics, want) {
+		t.Fatalf("topics = %+v, want %+v", body.Topics, want)
+	}
+	if body.CountedAt.IsZero() {
+		t.Fatal("counted_at is missing")
+	}
+}
+
+func TestPresenceEndpointAnswersACountThatFailedWithAServerError(t *testing.T) {
+	mux := newTestMuxCounting(t, newFakeRepository("雑談"), testAdminToken, stubPresence{err: errors.New("redis is down")})
+
+	rec := do(mux, http.MethodGet, "/api/admin/topics/presence", "", true)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
 	}
 }

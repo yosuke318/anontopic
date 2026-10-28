@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -399,5 +400,76 @@ func TestAMessageOverTheRateIsHeldBack(t *testing.T) {
 		if subject != tokenAlice {
 			t.Fatalf("subject = %q, want %q", subject, tokenAlice)
 		}
+	}
+}
+
+// heldHeartbeatStore holds the heartbeats of one token until release is
+// closed, so that a test can have a heartbeat in flight while that
+// participant leaves.
+type heldHeartbeatStore struct {
+	*fakeStore
+	token    string
+	entered  chan struct{}
+	release  chan struct{}
+	returned chan struct{}
+	once     sync.Once
+}
+
+func (s *heldHeartbeatStore) Heartbeat(ctx context.Context, seat Seat, now time.Time, ttl time.Duration) ([]string, error) {
+	if seat.Token != s.token {
+		return s.fakeStore.Heartbeat(ctx, seat, now, ttl)
+	}
+
+	held := false
+	s.once.Do(func() { held = true })
+	if !held {
+		return s.fakeStore.Heartbeat(ctx, seat, now, ttl)
+	}
+
+	close(s.entered)
+	<-s.release
+	defer close(s.returned)
+	return s.fakeStore.Heartbeat(ctx, seat, now, ttl)
+}
+
+func TestAHeartbeatInFlightDoesNotKeepAParticipantWhoLeftCounted(t *testing.T) {
+	repo := newFakeRepository(tokenAlice, tokenBob)
+	store := &heldHeartbeatStore{
+		fakeStore: newFakeStore(),
+		token:     tokenBob,
+		entered:   make(chan struct{}),
+		release:   make(chan struct{}),
+		returned:  make(chan struct{}),
+	}
+	srv := newTestServer(t, repo, store, nil, nil, testOptions(), tokenAlice, tokenBob)
+
+	alice := dial(t, srv, repo.conv.ID, tokenAlice)
+	bob := dial(t, srv, repo.conv.ID, tokenBob)
+	await(t, alice, eventJoined)
+	await(t, bob, eventJoined)
+
+	select {
+	case <-store.entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("bob's heartbeat never ran")
+	}
+
+	// Bob leaves while his heartbeat is still being recorded, and the
+	// heartbeat finishes only after the server has had time to see him go.
+	_ = bob.Close()
+	time.Sleep(50 * time.Millisecond)
+	close(store.release)
+
+	if ev, _ := await(t, alice, eventParticipantLeft); ev.Participant != 2 {
+		t.Fatalf("participant = %d, want 2", ev.Participant)
+	}
+	<-store.returned
+
+	counts, err := store.CountConnected(t.Context(), []int{repo.conv.TopicID}, time.Now().UTC(), testOptions().PresenceTTL)
+	if err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if counts[repo.conv.TopicID] != 1 {
+		t.Fatalf("connected = %d, want only alice", counts[repo.conv.TopicID])
 	}
 }

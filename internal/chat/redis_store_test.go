@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"fmt"
+	"maps"
 	"math/rand/v2"
 	"os"
 	"slices"
@@ -47,6 +48,17 @@ func testConversationID(t *testing.T, store *RedisStore) string {
 
 	id := fmt.Sprintf("%s-%d", t.Name(), rand.Int64())
 	t.Cleanup(func() { store.client.Del(context.Background(), presenceKey(id)) })
+
+	return id
+}
+
+// testTopicID is a topic of its own, so that tests running against the same
+// Redis do not count each other's participants.
+func testTopicID(t *testing.T, store *RedisStore) int {
+	t.Helper()
+
+	id := 1_000_000 + rand.IntN(1_000_000_000)
+	t.Cleanup(func() { store.client.Del(context.Background(), topicPresenceKey(id)) })
 
 	return id
 }
@@ -111,10 +123,11 @@ func TestRedisStoreCountsEveryParticipantOnce(t *testing.T) {
 	store := redisTestStore(t)
 	ctx := t.Context()
 	id := testConversationID(t, store)
+	topicID := testTopicID(t, store)
 	now := time.Now().UTC()
 	ttl := time.Minute
 
-	connected, err := store.Join(ctx, id, "alice", now, ttl)
+	connected, err := store.Join(ctx, Seat{ConversationID: id, TopicID: topicID, Token: "alice"}, now, ttl)
 	if err != nil {
 		t.Fatalf("join: %v", err)
 	}
@@ -123,21 +136,21 @@ func TestRedisStoreCountsEveryParticipantOnce(t *testing.T) {
 	}
 
 	// A participant who connects again holds the single entry they had.
-	if connected, err = store.Join(ctx, id, "alice", now.Add(time.Second), ttl); err != nil {
+	if connected, err = store.Join(ctx, Seat{ConversationID: id, TopicID: topicID, Token: "alice"}, now.Add(time.Second), ttl); err != nil {
 		t.Fatalf("join again: %v", err)
 	}
 	if !slices.Equal(connected, []string{"alice"}) {
 		t.Fatalf("connected = %v, want one entry for the participant that connected again", connected)
 	}
 
-	if connected, err = store.Join(ctx, id, "bob", now.Add(2*time.Second), ttl); err != nil {
+	if connected, err = store.Join(ctx, Seat{ConversationID: id, TopicID: topicID, Token: "bob"}, now.Add(2*time.Second), ttl); err != nil {
 		t.Fatalf("join: %v", err)
 	}
 	if len(connected) != 2 {
 		t.Fatalf("connected = %v, want both participants", connected)
 	}
 
-	if connected, err = store.Leave(ctx, id, "alice", now.Add(3*time.Second), ttl); err != nil {
+	if connected, err = store.Leave(ctx, Seat{ConversationID: id, TopicID: topicID, Token: "alice"}, now.Add(3*time.Second), ttl); err != nil {
 		t.Fatalf("leave: %v", err)
 	}
 	if !slices.Equal(connected, []string{"bob"}) {
@@ -149,22 +162,76 @@ func TestRedisStoreDropsAParticipantThatStoppedSayingItIsThere(t *testing.T) {
 	store := redisTestStore(t)
 	ctx := t.Context()
 	id := testConversationID(t, store)
+	topicID := testTopicID(t, store)
 	now := time.Now().UTC()
 	ttl := 30 * time.Second
 
-	if _, err := store.Join(ctx, id, "alice", now, ttl); err != nil {
+	if _, err := store.Join(ctx, Seat{ConversationID: id, TopicID: topicID, Token: "alice"}, now, ttl); err != nil {
 		t.Fatalf("join: %v", err)
 	}
-	if _, err := store.Join(ctx, id, "bob", now, ttl); err != nil {
+	if _, err := store.Join(ctx, Seat{ConversationID: id, TopicID: topicID, Token: "bob"}, now, ttl); err != nil {
 		t.Fatalf("join: %v", err)
 	}
 
 	// The server holding alice is gone: only bob keeps saying it is there.
-	connected, err := store.Heartbeat(ctx, id, "bob", now.Add(2*ttl), ttl)
+	connected, err := store.Heartbeat(ctx, Seat{ConversationID: id, TopicID: topicID, Token: "bob"}, now.Add(2*ttl), ttl)
 	if err != nil {
 		t.Fatalf("heartbeat: %v", err)
 	}
 	if !slices.Equal(connected, []string{"bob"}) {
 		t.Fatalf("connected = %v, want the participant that is still there", connected)
+	}
+}
+
+func TestRedisStoreCountsTheParticipantsConnectedUnderEachTopic(t *testing.T) {
+	store := redisTestStore(t)
+	ctx := t.Context()
+	first := testConversationID(t, store)
+	second := testConversationID(t, store)
+	other := testConversationID(t, store)
+	topicID := testTopicID(t, store)
+	otherTopicID := testTopicID(t, store)
+	quietTopicID := testTopicID(t, store)
+	now := time.Now().UTC()
+	ttl := 30 * time.Second
+
+	for _, seat := range []Seat{
+		{ConversationID: first, TopicID: topicID, Token: "alice"},
+		{ConversationID: first, TopicID: topicID, Token: "bob"},
+		{ConversationID: second, TopicID: topicID, Token: "carol"},
+		{ConversationID: other, TopicID: otherTopicID, Token: "dave"},
+	} {
+		if _, err := store.Join(ctx, seat, now, ttl); err != nil {
+			t.Fatalf("join %s: %v", seat.Token, err)
+		}
+	}
+
+	// A participant who connects again is counted once, and one who left is
+	// not counted.
+	if _, err := store.Join(ctx, Seat{ConversationID: first, TopicID: topicID, Token: "alice"}, now.Add(time.Second), ttl); err != nil {
+		t.Fatalf("join again: %v", err)
+	}
+	if _, err := store.Leave(ctx, Seat{ConversationID: second, TopicID: topicID, Token: "carol"}, now.Add(time.Second), ttl); err != nil {
+		t.Fatalf("leave: %v", err)
+	}
+
+	counts, err := store.CountConnected(ctx, []int{topicID, otherTopicID, quietTopicID}, now.Add(2*time.Second), ttl)
+	if err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	want := map[int]int{topicID: 2, otherTopicID: 1, quietTopicID: 0}
+	if !maps.Equal(counts, want) {
+		t.Fatalf("counts = %v, want %v", counts, want)
+	}
+
+	// Only alice was kept after the others joined, so once the others' entries
+	// are ttl old only she is counted.
+	counts, err = store.CountConnected(ctx, []int{topicID, otherTopicID}, now.Add(ttl), ttl)
+	if err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	want = map[int]int{topicID: 1, otherTopicID: 0}
+	if !maps.Equal(counts, want) {
+		t.Fatalf("counts after ttl = %v, want %v", counts, want)
 	}
 }

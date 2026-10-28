@@ -471,6 +471,33 @@ paths:
         "500":
           $ref: "#/components/responses/InternalServerError"
 
+  /api/admin/topics/presence:
+    get:
+      tags: [topic]
+      operationId: countTopicPresence
+      summary: トピックごとに、いま何人いるかを返す
+      description: |
+        無効なトピックも含め、全トピックについて返す。無効にしたトピックでも、
+        すでに始まっている会話は続くため。
+
+        `connected` はそのトピックの会話に WebSocket で接続している参加者の数、
+        `waiting` はそのトピックのキューで待っている利用者の数（2 人部屋と 3 人部屋の合計）。
+        どちらも Redis にある接続と待機の記録から数える。接続を持つサーバーが止まった場合、
+        その参加者は接続の記録が切れる（最大 30 秒）まで数に残る。
+      security:
+        - adminToken: []
+      responses:
+        "200":
+          description: トピックごとの人数
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TopicPresenceList"
+        "401":
+          $ref: "#/components/responses/AdminUnauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
   /api/admin/topics/{id}:
     parameters:
       - name: id
@@ -1047,6 +1074,44 @@ components:
           format: date-time
           examples:
             - "2026-08-26T09:12:03.482913Z"
+
+    TopicPresence:
+      type: object
+      description: 1 つのトピックにいる人数。
+      required: [id, connected, waiting]
+      properties:
+        id:
+          type: integer
+          description: トピックID
+          examples:
+            - 1
+        connected:
+          type: integer
+          minimum: 0
+          description: このトピックの会話に接続している参加者の数
+          examples:
+            - 5
+        waiting:
+          type: integer
+          minimum: 0
+          description: このトピックのキューで待っている利用者の数
+          examples:
+            - 1
+
+    TopicPresenceList:
+      type: object
+      required: [counted_at, topics]
+      properties:
+        counted_at:
+          type: string
+          format: date-time
+          description: 数えた時刻
+          examples:
+            - "2026-10-28T04:12:03.482Z"
+        topics:
+          type: array
+          items:
+            $ref: "#/components/schemas/TopicPresence"
 
     AdminTopicList:
       type: object

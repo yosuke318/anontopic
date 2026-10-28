@@ -224,6 +224,30 @@ func NewService(store Store, repo Repository, topics TopicCatalogue, bans BanLis
 	}
 }
 
+// WaitingByTopic returns how many users wait for a room under each topic in
+// topicIDs, whatever type of room they wait for. A user whose wait passed
+// WaitTTL is left out.
+func (s *Service) WaitingByTopic(ctx context.Context, topicIDs []int) (map[int]int, error) {
+	queues := make([]Queue, 0, 2*len(topicIDs))
+	for _, id := range topicIDs {
+		queues = append(queues, Queue{TopicID: id, RoomType: roomTypeTwo}, Queue{TopicID: id, RoomType: roomTypeThree})
+	}
+
+	waiting, err := s.store.CountWaiting(ctx, queues, s.now().UTC(), s.waitTTL)
+	if err != nil {
+		return nil, err
+	}
+
+	counts := make(map[int]int, len(topicIDs))
+	for _, id := range topicIDs {
+		counts[id] = 0
+	}
+	for q, n := range waiting {
+		counts[q.TopicID] += n
+	}
+	return counts, nil
+}
+
 // Join puts the user behind token in the queue q names and tries to form a
 // room out of it. The returned State says whether the user got one.
 func (s *Service) Join(ctx context.Context, token string, id Identity, q Queue) (State, error) {

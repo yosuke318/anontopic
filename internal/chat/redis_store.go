@@ -11,8 +11,9 @@ import (
 )
 
 const (
-	roomChannelPrefix = "chat:room:"
-	presenceKeyPrefix = "chat:presence:"
+	roomChannelPrefix      = "chat:room:"
+	presenceKeyPrefix      = "chat:presence:"
+	topicPresenceKeyPrefix = "chat:topic-presence:"
 
 	// subscriptionBuffer is how many events one room's subscription holds
 	// while its connections are being written to.
@@ -27,21 +28,33 @@ const (
 // said it was still there. A token whose entry is older than the lifetime a
 // connection keeps it for is dropped, so a server that died stops counting
 // towards the room it was holding connections to.
+//
+// The same entry is kept in a sorted set per topic as well, whose members are
+// the conversation ID and the token joined by a colon, so that the
+// participants connected under one topic are counted without reading every
+// room. Both keys are written in one script, which is why they have to live
+// on a single Redis node.
 var presenceScript = redis.NewScript(`
 local key = KEYS[1]
+local topicKey = KEYS[2]
 local token = ARGV[1]
 local now = ARGV[2]
 local staleBefore = ARGV[3]
 local ttl = ARGV[4]
 local connected = ARGV[5]
+local topicMember = ARGV[6]
 
 redis.call('ZREMRANGEBYSCORE', key, '-inf', staleBefore)
+redis.call('ZREMRANGEBYSCORE', topicKey, '-inf', staleBefore)
 
 if connected == '1' then
 	redis.call('ZADD', key, now, token)
 	redis.call('PEXPIRE', key, ttl)
+	redis.call('ZADD', topicKey, now, topicMember)
+	redis.call('PEXPIRE', topicKey, ttl)
 else
 	redis.call('ZREM', key, token)
+	redis.call('ZREM', topicKey, topicMember)
 end
 
 return redis.call('ZRANGE', key, 0, -1)
@@ -94,32 +107,55 @@ func (s *RedisStore) Subscribe(ctx context.Context, conversationID string) (Subs
 	return sub, nil
 }
 
-// Join records token as connected to the room.
-func (s *RedisStore) Join(ctx context.Context, conversationID, token string, now time.Time, ttl time.Duration) ([]string, error) {
-	return s.presence(ctx, conversationID, token, now, ttl, presenceConnected)
+// Join records the token of seat as connected to the room.
+func (s *RedisStore) Join(ctx context.Context, seat Seat, now time.Time, ttl time.Duration) ([]string, error) {
+	return s.presence(ctx, seat, now, ttl, presenceConnected)
 }
 
-// Heartbeat keeps token connected to the room for another ttl.
-func (s *RedisStore) Heartbeat(ctx context.Context, conversationID, token string, now time.Time, ttl time.Duration) ([]string, error) {
-	return s.presence(ctx, conversationID, token, now, ttl, presenceConnected)
+// Heartbeat keeps the token of seat connected to the room for another ttl.
+func (s *RedisStore) Heartbeat(ctx context.Context, seat Seat, now time.Time, ttl time.Duration) ([]string, error) {
+	return s.presence(ctx, seat, now, ttl, presenceConnected)
 }
 
-// Leave drops token from the participants connected to the room.
-func (s *RedisStore) Leave(ctx context.Context, conversationID, token string, now time.Time, ttl time.Duration) ([]string, error) {
-	return s.presence(ctx, conversationID, token, now, ttl, presenceDisconnected)
+// Leave drops the token of seat from the participants connected to the room.
+func (s *RedisStore) Leave(ctx context.Context, seat Seat, now time.Time, ttl time.Duration) ([]string, error) {
+	return s.presence(ctx, seat, now, ttl, presenceDisconnected)
+}
+
+// CountConnected counts the entries of each topic that are younger than ttl.
+// An entry exactly ttl old is left out, as presenceScript drops it.
+func (s *RedisStore) CountConnected(ctx context.Context, topicIDs []int, now time.Time, ttl time.Duration) (map[int]int, error) {
+	freshAfter := "(" + strconv.FormatInt(now.Add(-ttl).UnixMilli(), 10)
+
+	pipe := s.client.Pipeline()
+	cmds := make([]*redis.IntCmd, len(topicIDs))
+	for i, id := range topicIDs {
+		cmds[i] = pipe.ZCount(ctx, topicPresenceKey(id), freshAfter, "+inf")
+	}
+	if _, err := pipe.Exec(ctx); err != nil {
+		return nil, fmt.Errorf("count the participants connected under the topics: %w", err)
+	}
+
+	counts := make(map[int]int, len(topicIDs))
+	for i, id := range topicIDs {
+		counts[id] = int(cmds[i].Val())
+	}
+	return counts, nil
 }
 
 // presence runs presenceScript and returns the tokens connected to the room.
-func (s *RedisStore) presence(ctx context.Context, conversationID, token string, now time.Time, ttl time.Duration, connected string) ([]string, error) {
+func (s *RedisStore) presence(ctx context.Context, seat Seat, now time.Time, ttl time.Duration, connected string) ([]string, error) {
 	args := []any{
-		token,
+		seat.Token,
 		strconv.FormatInt(now.UnixMilli(), 10),
 		strconv.FormatInt(now.Add(-ttl).UnixMilli(), 10),
 		strconv.FormatInt(ttl.Milliseconds(), 10),
 		connected,
+		seat.ConversationID + ":" + seat.Token,
 	}
 
-	tokens, err := presenceScript.Run(ctx, s.client, []string{presenceKey(conversationID)}, args...).StringSlice()
+	keys := []string{presenceKey(seat.ConversationID), topicPresenceKey(seat.TopicID)}
+	tokens, err := presenceScript.Run(ctx, s.client, keys, args...).StringSlice()
 	if err != nil {
 		return nil, fmt.Errorf("read the participants connected to the room: %w", err)
 	}
@@ -163,3 +199,5 @@ func (s *redisSubscription) Close() error {
 func roomChannel(conversationID string) string { return roomChannelPrefix + conversationID }
 
 func presenceKey(conversationID string) string { return presenceKeyPrefix + conversationID }
+
+func topicPresenceKey(topicID int) string { return topicPresenceKeyPrefix + strconv.Itoa(topicID) }
