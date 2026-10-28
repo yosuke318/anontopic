@@ -2,7 +2,7 @@
 
 - ステータス: Accepted
 - 日付: 2026-10-28
-- 関連 issue: 未作成
+- 関連 issue: YOSUKE-229
 
 ## 文脈
 
