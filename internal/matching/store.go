@@ -41,7 +41,7 @@ type Store interface {
 	// waits nowhere is not an error.
 	Remove(ctx context.Context, token string) error
 
-	// CountWaiting returns how many users wait in each of queues, leaving out
+	// CountWaiting returns how many users wait in each queue, leaving out
 	// the ones whose wait passed ttl. A queue nobody waits in answers zero.
 	CountWaiting(ctx context.Context, queues []Queue, now time.Time, ttl time.Duration) (map[Queue]int, error)
 }
