@@ -88,10 +88,11 @@ func TestCountByRegionCountsTheParticipantsAndTheReportedOnes(t *testing.T) {
 	tokyo := Location{Country: "JP", Prefecture: "JP-13", ASN: 2516}
 	osaka := Location{Country: "JP", Prefecture: "JP-27", ASN: 17676}
 	reporter := fmt.Sprintf("reporter-%d", rand.Int64())
+	second := fmt.Sprintf("b-%d", rand.Int64())
 
 	conv, err := repo.CreateConversation(ctx, topicID, []Participant{
 		{Token: reporter, Location: tokyo},
-		{Token: fmt.Sprintf("b-%d", rand.Int64()), Location: osaka},
+		{Token: second, Location: osaka},
 		{Token: fmt.Sprintf("c-%d", rand.Int64())},
 	})
 	if err != nil {
@@ -126,6 +127,25 @@ func TestCountByRegionCountsTheParticipantsAndTheReportedOnes(t *testing.T) {
 	for region, s := range want {
 		if stats[region] != s {
 			t.Fatalf("stats[%+v] = %+v, want %+v", region, stats[region], s)
+		}
+	}
+
+	// Reported by two of its participants, the conversation counts each of
+	// the others once, and neither of the reporters.
+	stats, err = repo.CountByRegion(ctx, from, to, []Report{
+		{ConversationID: conv.ID, ReporterToken: reporter},
+		{ConversationID: conv.ID, ReporterToken: second},
+	})
+	if err != nil {
+		t.Fatalf("CountByRegion: %v", err)
+	}
+	for region, wantReports := range map[Region]int64{
+		{Country: "JP", Prefecture: "JP-13"}: 0,
+		{Country: "JP", Prefecture: "JP-27"}: 0,
+		{}:                                   1,
+	} {
+		if got := stats[region].Reports; got != wantReports {
+			t.Fatalf("reports of %+v = %d, want %d", region, got, wantReports)
 		}
 	}
 

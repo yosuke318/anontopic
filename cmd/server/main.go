@@ -434,7 +434,6 @@ func newCapacityService(rdb *redis.Client) *capacity.Service {
 	return capacity.NewService(capacity.NewRedisStore(rdb), opts)
 }
 
-// newSessionService builds the session module from the environment.
 // startGeoIP downloads the GeoLite databases in the background and keeps
 // them up to date until ctx ends. Without the credentials of a MaxMind
 // account, it returns nil and no session holds a location.
@@ -450,6 +449,7 @@ func startGeoIP(ctx context.Context) session.Locator {
 	return db
 }
 
+// newSessionService builds the session module from the environment.
 func newSessionService(rdb *redis.Client, locator session.Locator) (*session.Service, error) {
 	sameSite, err := parseSameSite(envOr("SESSION_COOKIE_SAMESITE", "lax"))
 	if err != nil {

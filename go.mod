@@ -6,6 +6,8 @@ require (
 	github.com/golang-migrate/migrate/v4 v4.19.1
 	github.com/gorilla/websocket v1.5.3
 	github.com/jackc/pgx/v5 v5.10.0
+	github.com/maxmind/mmdbwriter v1.2.0
+	github.com/oschwald/geoip2-golang/v2 v2.5.0
 	github.com/redis/go-redis/v9 v9.22.0
 	golang.org/x/text v0.31.0
 )
@@ -21,9 +23,7 @@ require (
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/lib/pq v1.10.9 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
-	github.com/maxmind/mmdbwriter v1.2.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
-	github.com/oschwald/geoip2-golang/v2 v2.5.0 // indirect
 	github.com/oschwald/maxminddb-golang/v2 v2.8.0 // indirect
 	github.com/prometheus/client_golang v1.19.1 // indirect
 	github.com/prometheus/client_model v0.6.1 // indirect

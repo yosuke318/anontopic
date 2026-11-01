@@ -38,5 +38,5 @@ COMMENT ON COLUMN geo_daily_stats.stat_date IS '集計日（日本時間）';
 COMMENT ON COLUMN geo_daily_stats.country_code IS '国（ISO 3166-1 alpha-2）。空文字は不明';
 COMMENT ON COLUMN geo_daily_stats.prefecture IS '都道府県（ISO 3166-2）。空文字は不明か日本以外';
 COMMENT ON COLUMN geo_daily_stats.connection_count IS 'その日に会話に参加した人数';
-COMMENT ON COLUMN geo_daily_stats.report_count IS 'その日にあった通報について、通報した人を除く会話の参加者を数えた数';
+COMMENT ON COLUMN geo_daily_stats.report_count IS 'その日に通報された会話の参加者のうち、その日に通報した人を除いた数。何度通報された会話でも、参加者は 1 回だけ数える';
 COMMENT ON COLUMN geo_daily_stats.updated_at IS '最後に集計した日時';

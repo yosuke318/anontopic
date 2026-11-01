@@ -94,8 +94,9 @@ func SummarizeGeo(ctx context.Context, records GeoRecords, reports Reports, now 
 }
 
 // CountByRegion counts by region the participants who joined from from up
-// to, but not including, to, and the participants of the reported
-// conversations other than the user who reported them.
+// to, but not including, to, and the participants of the conversations in
+// reports. A conversation reported more than once counts each of its
+// participants once, and none of the users who reported it.
 func (r *PostgresRepository) CountByRegion(ctx context.Context, from, to time.Time, reports []Report) (map[Region]GeoStat, error) {
 	stats := make(map[Region]GeoStat)
 
@@ -121,10 +122,12 @@ func (r *PostgresRepository) CountByRegion(ctx context.Context, from, to time.Ti
 		reporters[i] = rep.ReporterToken
 	}
 	rows, err = r.pool.Query(ctx,
-		"SELECT coalesce(p.country_code, ''), coalesce(p.prefecture, ''), count(*) "+
-			"FROM unnest($1::uuid[], $2::text[]) AS r(conversation_id, reporter_token) "+
-			"JOIN conversation_participants p "+
-			"ON p.conversation_id = r.conversation_id AND p.session_token <> r.reporter_token "+
+		"WITH r AS (SELECT * FROM unnest($1::uuid[], $2::text[]) AS r(conversation_id, reporter_token)) "+
+			"SELECT coalesce(p.country_code, ''), coalesce(p.prefecture, ''), count(*) "+
+			"FROM conversation_participants p "+
+			"WHERE p.conversation_id IN (SELECT conversation_id FROM r) "+
+			"AND NOT EXISTS (SELECT 1 FROM r "+
+			"WHERE r.conversation_id = p.conversation_id AND r.reporter_token = p.session_token) "+
 			"GROUP BY 1, 2",
 		conversations, reporters)
 	if err != nil {
