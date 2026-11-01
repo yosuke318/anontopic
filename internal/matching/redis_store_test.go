@@ -46,7 +46,7 @@ func redisTestStore(t *testing.T) *RedisStore {
 // testQueue is a queue of its own, so that tests running against the same
 // Redis do not read each other's users. The counts the test leaves under the
 // queue are removed with it, so that the daily batch run on the local stack
-// does not find a topic that does not exist.
+// does not copy them for a topic that does not exist.
 func testQueue(t *testing.T, store *RedisStore, roomType int) Queue {
 	t.Helper()
 

@@ -1,9 +1,12 @@
 -- 待機列に入った人数を、トピックとルーム種別ごとに日別で残す。数は Redis で数え、
 -- 日次バッチがこの表に書き写す。理由は
 -- docs/adr/0043-count-the-topic-demand-in-redis-and-keep-only-daily-totals.md。
+--
+-- topic_id は topics を外部キーで参照しない。参照すると、待機列に入られたことのある
+-- トピックを削除できなくなり、削除した日の分を書き写すときにも失敗する。
 CREATE TABLE topic_daily_stats (
     stat_date     DATE NOT NULL,
-    topic_id      INT NOT NULL REFERENCES topics(id),
+    topic_id      INT NOT NULL,
     room_type     SMALLINT NOT NULL,
     queued_count  INT NOT NULL DEFAULT 0,
     matched_count INT NOT NULL DEFAULT 0,
@@ -15,7 +18,7 @@ CREATE TABLE topic_daily_stats (
 
 COMMENT ON TABLE topic_daily_stats IS 'トピック別の日次需要';
 COMMENT ON COLUMN topic_daily_stats.stat_date IS '集計日（日本時間）';
-COMMENT ON COLUMN topic_daily_stats.topic_id IS 'トピックID';
+COMMENT ON COLUMN topic_daily_stats.topic_id IS 'トピックID。削除したトピックの行も残る';
 COMMENT ON COLUMN topic_daily_stats.room_type IS '利用者が選んだルーム種別。2:2人ルーム、3:3人ルーム。3人ルームを選び 2 人で成立した人も 3 に数える';
 COMMENT ON COLUMN topic_daily_stats.queued_count IS '待機列に入った人数。同じ人が入り直すと、その回数だけ数える';
 COMMENT ON COLUMN topic_daily_stats.matched_count IS 'ルームが成立して待機列を出た人数';

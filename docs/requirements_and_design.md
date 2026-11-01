@@ -220,7 +220,7 @@ CREATE TABLE geo_daily_stats (
 -- トピック別の日次需要(待機列に入った人数と成立した人数。Redisで数え、日次バッチで書き写す)
 CREATE TABLE topic_daily_stats (
     stat_date     DATE NOT NULL,           -- 日本時間
-    topic_id      INT NOT NULL REFERENCES topics(id),
+    topic_id      INT NOT NULL,            -- topicsを外部キーで参照しない(削除したトピックの行も残す)
     room_type     SMALLINT NOT NULL,       -- 利用者が選んだルーム種別
     queued_count  INT NOT NULL DEFAULT 0,
     matched_count INT NOT NULL DEFAULT 0,
