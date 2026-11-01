@@ -81,7 +81,7 @@ function Screen({ kind, children }: { kind: Status["kind"]; children?: ReactNode
 }
 
 const primaryButtonClass =
-  "bg-brand text-brand-contrast hover:bg-brand-hover inline-flex h-12 items-center justify-center rounded-full px-8 font-semibold transition-colors";
+  "bg-brand text-brand-contrast hover:bg-brand-hover shadow-brand inline-flex h-12 items-center justify-center rounded-full px-8 font-bold transition-colors";
 
 const secondaryButtonClass =
   "border-line hover:bg-surface inline-flex h-12 items-center justify-center rounded-full border px-8 font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50";

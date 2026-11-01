@@ -94,7 +94,7 @@ export function TopicPicker({ topics }: { topics: Topic[] }) {
           {topics.map((topic) => (
             <label
               key={topic.id}
-              className={`outline-brand cursor-pointer rounded-full border px-5 py-2.5 text-sm font-medium transition-colors focus-within:outline-2 focus-within:outline-offset-2 ${
+              className={`outline-brand-ink cursor-pointer rounded-full border px-5 py-2.5 text-sm font-medium transition-colors focus-within:outline-2 focus-within:outline-offset-2 ${
                 topicId === topic.id
                   ? "border-brand bg-brand text-brand-contrast"
                   : "border-line hover:bg-surface"
@@ -121,7 +121,7 @@ export function TopicPicker({ topics }: { topics: Topic[] }) {
           {roomTypes.map((value) => (
             <label
               key={value}
-              className={`outline-brand cursor-pointer rounded-2xl border p-5 transition-colors focus-within:outline-2 focus-within:outline-offset-2 ${
+              className={`outline-brand-ink cursor-pointer rounded-2xl border p-5 transition-colors focus-within:outline-2 focus-within:outline-offset-2 ${
                 roomType === value ? "border-brand bg-brand-soft" : "border-line hover:bg-surface"
               }`}
             >
@@ -156,7 +156,7 @@ export function TopicPicker({ topics }: { topics: Topic[] }) {
             <select
               value={gender}
               onChange={(event) => setGender(event.target.value as Gender | "")}
-              className="border-line bg-background focus:outline-brand mt-2 block h-11 w-full rounded-xl border px-3 focus:outline-2 focus:outline-offset-2"
+              className="border-line bg-background focus:outline-brand-ink mt-2 block h-11 w-full rounded-xl border px-3 focus:outline-2 focus:outline-offset-2"
             >
               <option value="">答えない</option>
               {genderOptions.map((option) => (
@@ -171,7 +171,7 @@ export function TopicPicker({ topics }: { topics: Topic[] }) {
             <select
               value={ageBand}
               onChange={(event) => setAgeBand(event.target.value as AgeBand | "")}
-              className="border-line bg-background focus:outline-brand mt-2 block h-11 w-full rounded-xl border px-3 focus:outline-2 focus:outline-offset-2"
+              className="border-line bg-background focus:outline-brand-ink mt-2 block h-11 w-full rounded-xl border px-3 focus:outline-2 focus:outline-offset-2"
             >
               <option value="">答えない</option>
               {ageBandOptions.map((option) => (
@@ -191,14 +191,24 @@ export function TopicPicker({ topics }: { topics: Topic[] }) {
       )}
 
       {!termsAccepted && (
-        <div className="border-line mt-12 rounded-2xl border p-5">
+        <div className="bg-notice mt-12 rounded-3xl p-5">
           <p className="text-muted text-sm leading-6">
             {siteNotice}
-            <Link href="/terms" target="_blank" rel="noopener noreferrer" className="text-foreground underline">
+            <Link
+              href="/terms"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-foreground underline"
+            >
               利用規約
             </Link>
             と
-            <Link href="/privacy" target="_blank" rel="noopener noreferrer" className="text-foreground underline">
+            <Link
+              href="/privacy"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-foreground underline"
+            >
               プライバシーポリシー
             </Link>
             をお読みください。
@@ -219,7 +229,7 @@ export function TopicPicker({ topics }: { topics: Topic[] }) {
         <button
           type="submit"
           disabled={!canStart || submitting}
-          className="bg-brand text-brand-contrast hover:bg-brand-hover inline-flex h-12 items-center justify-center rounded-full px-8 text-base font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+          className="bg-brand text-brand-contrast hover:bg-brand-hover shadow-brand inline-flex h-12 items-center justify-center rounded-full px-8 text-base font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
         >
           {submitting ? "待機を始めています…" : "話しはじめる"}
         </button>

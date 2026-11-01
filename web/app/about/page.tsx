@@ -173,7 +173,7 @@ export default function AboutPage() {
         <div className="mt-14">
           <Link
             href="/topics"
-            className="bg-brand text-brand-contrast hover:bg-brand-hover inline-flex h-12 items-center justify-center rounded-full px-8 text-base font-semibold transition-colors"
+            className="bg-brand text-brand-contrast hover:bg-brand-hover shadow-brand inline-flex h-12 items-center justify-center rounded-full px-8 text-base font-bold transition-colors"
           >
             トピックを選ぶ
           </Link>

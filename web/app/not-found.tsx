@@ -18,7 +18,7 @@ export default function NotFound() {
         </p>
         <Link
           href="/"
-          className="bg-brand text-brand-contrast hover:bg-brand-hover mt-10 inline-flex h-12 items-center justify-center rounded-full px-8 font-semibold transition-colors"
+          className="bg-brand text-brand-contrast hover:bg-brand-hover shadow-brand mt-10 inline-flex h-12 items-center justify-center rounded-full px-8 font-bold transition-colors"
         >
           トップへ戻る
         </Link>

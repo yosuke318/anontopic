@@ -1,20 +1,26 @@
 @import "tailwindcss";
 
+/* デザイン案「やわらかミルク」の配色。設計がクリーム地の明るい一式だけなので、端末が
+   ダークモードでも切り替えない。 */
 :root {
-  --background: #ffffff;
-  --surface: #f6f7f9;
-  --surface-strong: #eceff3;
-  --foreground: #16181d;
-  --muted: #5b6472;
-  --line: #dfe3e9;
-  --brand: #0f766e;
-  --brand-hover: #115e56;
-  --brand-soft: #e2f4f1;
-  --brand-contrast: #ffffff;
-  --danger: #b4231f;
+  --background: #fff8f4;
+  --surface: #ffffff;
+  --surface-strong: #f3e6ea;
+  --foreground: #3b2f36;
+  --muted: #74636c;
+  --line: #ead9df;
+  /* ピンクは塗りに使い、上の文字は --brand-contrast にする。クリーム地の上の文字や
+     フォーカスの枠には、読める濃さの --brand-ink を使う。 */
+  --brand: #ff8fab;
+  --brand-hover: #ff7d9e;
+  --brand-edge: #e8718f;
+  --brand-soft: #fff0f3;
+  --brand-contrast: #3b2f36;
+  --brand-ink: #b8325c;
+  --danger: #a8274f;
+  --notice: #fff3c4;
 
-  /* 会話画面の配色。設計がクリーム地の明るい一式だけなので、端末がダークモードでも
-     切り替えない。ここをダークの:rootに書かないことで固定している。 */
+  /* 会話画面の配色。 */
   --chat-bg: #fff8f4;
   --chat-panel: #ffffff;
   --chat-ink: #3b2f36;
@@ -40,22 +46,6 @@
   --chat-peer-2-tint: #f3effc;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0e1013;
-    --surface: #16191e;
-    --surface-strong: #1e232a;
-    --foreground: #eceef1;
-    --muted: #9aa4b2;
-    --line: #2a2f37;
-    --brand: #5eddcd;
-    --brand-hover: #7ee8da;
-    --brand-soft: #16302e;
-    --brand-contrast: #08201d;
-    --danger: #ff8a84;
-  }
-}
-
 @theme inline {
   --color-background: var(--background);
   --color-surface: var(--surface);
@@ -67,7 +57,12 @@
   --color-brand-hover: var(--brand-hover);
   --color-brand-soft: var(--brand-soft);
   --color-brand-contrast: var(--brand-contrast);
+  --color-brand-ink: var(--brand-ink);
   --color-danger: var(--danger);
+  --color-notice: var(--notice);
+
+  /* ピンクのボタンの下に付ける、押せそうに見せる影。 */
+  --shadow-brand: 0 4px 0 var(--brand-edge);
 
   --color-chat-bg: var(--chat-bg);
   --color-chat-panel: var(--chat-panel);
@@ -91,20 +86,18 @@
   --color-chat-peer-2-soft: var(--chat-peer-2-soft);
   --color-chat-peer-2-tint: var(--chat-peer-2-tint);
 
-  /* 端末に入っているフォントだけで日本語を組み、Web フォントの転送を避ける。 */
+  /* 全体を丸ゴシックで組む。Zen Maru Gothic は layout.tsx が読み込み、届くまでは
+     端末の丸ゴシックか通常のゴシックで表示する。 */
   --font-sans:
-    ui-sans-serif, system-ui, -apple-system, "Hiragino Kaku Gothic ProN", "Hiragino Sans",
+    var(--font-zen-maru), "Hiragino Maru Gothic ProN", "Hiragino Maru Gothic Pro", "Hiragino Sans",
     "BIZ UDPGothic", Meiryo, sans-serif;
-
-  /* 会話画面の丸ゴシック。入っていない端末では通常のゴシックに落ちる。 */
-  --font-rounded:
-    "Zen Maru Gothic", "Hiragino Maru Gothic ProN", "Hiragino Maru Gothic Pro", "Hiragino Sans",
-    var(--font-sans);
+  --font-rounded: var(--font-sans);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
+  font-weight: 500;
 }
 
 @media (prefers-reduced-motion: reduce) {
