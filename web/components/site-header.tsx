@@ -17,7 +17,7 @@ export function SiteHeader() {
           </Link>
           <Link
             href="/topics"
-            className="bg-brand text-brand-contrast hover:bg-brand-hover rounded-full px-4 py-2 font-medium transition-colors"
+            className="bg-brand text-brand-contrast hover:bg-brand-hover shadow-brand rounded-full px-4 py-2 font-bold transition-colors"
           >
             はじめる
           </Link>

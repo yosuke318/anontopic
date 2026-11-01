@@ -89,7 +89,7 @@ export default function HomePage() {
       />
 
       <section className="mx-auto w-full max-w-5xl px-5 py-16 sm:py-24">
-        <p className="text-brand text-sm font-semibold tracking-wide">{siteTagline}</p>
+        <p className="text-brand-ink text-sm font-semibold tracking-wide">{siteTagline}</p>
         <h1 className="mt-4 max-w-2xl text-4xl leading-tight font-bold tracking-tight sm:text-5xl">
           話したいことだけを持って、
           <br />
@@ -99,7 +99,7 @@ export default function HomePage() {
         <div className="mt-10 flex flex-col gap-3 sm:flex-row">
           <Link
             href="/topics"
-            className="bg-brand text-brand-contrast hover:bg-brand-hover inline-flex h-12 items-center justify-center rounded-full px-8 text-base font-semibold transition-colors"
+            className="bg-brand text-brand-contrast hover:bg-brand-hover shadow-brand inline-flex h-12 items-center justify-center rounded-full px-8 text-base font-bold transition-colors"
           >
             トピックを選んで話しはじめる
           </Link>
@@ -128,7 +128,7 @@ export default function HomePage() {
         <ol className="mt-8 grid gap-6 sm:grid-cols-3">
           {steps.map((step, index) => (
             <li key={step.title} className="border-line rounded-2xl border p-6">
-              <span className="bg-brand-soft text-brand flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold">
+              <span className="bg-brand-soft text-brand-ink flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold">
                 {index + 1}
               </span>
               <h3 className="mt-4 font-bold">{step.title}</h3>
@@ -177,7 +177,7 @@ export default function HomePage() {
           <p className="text-muted mt-4 leading-7">{closing}</p>
           <Link
             href="/topics"
-            className="bg-brand text-brand-contrast hover:bg-brand-hover mt-8 inline-flex h-12 items-center justify-center rounded-full px-8 text-base font-semibold transition-colors"
+            className="bg-brand text-brand-contrast hover:bg-brand-hover shadow-brand mt-8 inline-flex h-12 items-center justify-center rounded-full px-8 text-base font-bold transition-colors"
           >
             トピックを選ぶ
           </Link>

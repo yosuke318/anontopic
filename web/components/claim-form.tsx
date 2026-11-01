@@ -38,10 +38,10 @@ function messageForError(error: unknown): string {
 }
 
 const fieldClass =
-  "border-line bg-background focus:outline-brand w-full rounded-xl border px-4 py-3 text-sm focus:outline-2 focus:outline-offset-2";
+  "border-line bg-background focus:outline-brand-ink w-full rounded-xl border px-4 py-3 text-sm focus:outline-2 focus:outline-offset-2";
 
 const primaryButtonClass =
-  "bg-brand text-brand-contrast hover:bg-brand-hover inline-flex h-12 items-center justify-center rounded-full px-8 text-base font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50";
+  "bg-brand text-brand-contrast hover:bg-brand-hover shadow-brand inline-flex h-12 items-center justify-center rounded-full px-8 text-base font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none";
 
 export function ClaimForm() {
   const [name, setName] = useState("");
@@ -118,7 +118,7 @@ export function ClaimForm() {
           {claimRights.map((option) => (
             <label
               key={option.value}
-              className={`outline-brand cursor-pointer rounded-xl border px-4 py-3 text-sm transition-colors focus-within:outline-2 focus-within:outline-offset-2 ${
+              className={`outline-brand-ink cursor-pointer rounded-xl border px-4 py-3 text-sm transition-colors focus-within:outline-2 focus-within:outline-offset-2 ${
                 right === option.value
                   ? "border-brand bg-brand-soft"
                   : "border-line hover:bg-surface"
