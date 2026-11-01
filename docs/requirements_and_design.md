@@ -174,6 +174,8 @@ CREATE TABLE conversation_participants (
     prefecture      VARCHAR(20),
     asn             INT,
     is_suspected_vpn BOOLEAN NOT NULL DEFAULT false,
+    gender          VARCHAR(10),            -- 自己申告(任意)。female / male / other。マッチングにも表示にも使わない
+    age_band        VARCHAR(10),            -- 自己申告(任意)。under_18 / 18_19 / 20s ... 60_plus
     joined_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -302,7 +304,7 @@ CREATE TABLE topic_daily_stats (
 
 - 生IPアドレスは保存せず、ソルト付きハッシュ化した`ip_hash`と、多重接続検知に必要な範囲の`ip_subnet`のみを保持する。
 - 法的照会に備えても生IPは保持しない。照会でIPアドレスを示された場合は、同じ鍵でハッシュ化して`ip_hash`と照合する（ADR-0037）。
-- 保持期間は会話ログ(90日)とは別枠で管理し、参加から180日で`retention`モジュールが`ip_hash`と`device_fingerprint`を消す。通報された会話の参加者の分は残す（ADR-0037）。
+- 保持期間は会話ログ(90日)とは別枠で管理し、参加から180日で`retention`モジュールが`ip_hash`と`device_fingerprint`、自己申告の`gender`と`age_band`を消す。通報された会話の参加者の分は残す（ADR-0037）。
 
 ### 10. 今後の検討事項（未確定）
 

@@ -69,6 +69,19 @@ func (s *memoryStore) Refresh(_ context.Context, token, _ string, ttl time.Durat
 	return nil
 }
 
+func (s *memoryStore) SetAttributes(_ context.Context, token string, attrs Attributes) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	entry, ok := s.entries[token]
+	if !ok || !s.now().Before(entry.expiresAt) {
+		return ErrNotStored
+	}
+	entry.rec.Attributes = attrs
+	s.entries[token] = entry
+	return nil
+}
+
 func (s *memoryStore) Delete(_ context.Context, token string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -110,7 +123,7 @@ func requestFrom(remoteAddr string) *http.Request {
 func mustIssue(t *testing.T, svc *Service, remoteAddr string) Session {
 	t.Helper()
 
-	sess, err := svc.Issue(context.Background(), requestFrom(remoteAddr))
+	sess, err := svc.Issue(context.Background(), requestFrom(remoteAddr), Attributes{})
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}

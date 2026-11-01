@@ -1,4 +1,5 @@
 import { ApiError, apiBaseUrl, retryAfterSeconds } from "@/lib/api";
+import type { Attributes } from "@/lib/attributes";
 
 export const roomTypes = [2, 3] as const;
 
@@ -15,11 +16,14 @@ export type MatchingState = {
   };
 };
 
-// issueSessionは匿名セッションを用意する。すでに有効なCookieがあれば期限だけ延びる。
-export async function issueSession(): Promise<void> {
+// issueSessionは匿名セッションを用意する。すでに有効なCookieがあれば期限が延び、
+// 性別と年代の答えが置き換わる。
+export async function issueSession(attributes: Attributes): Promise<void> {
   const res = await fetch(`${apiBaseUrl()}/api/session`, {
     method: "POST",
     credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(attributes),
   });
   if (!res.ok) {
     throw new ApiError(res.status, retryAfterSeconds(res));

@@ -44,10 +44,21 @@ type sessionResponse struct {
 }
 
 // handleIssue hands the caller a usable session: it extends the one the
-// request carries, or creates a new one.
+// request carries, or creates a new one. A body with the attributes the user
+// gave replaces the attributes of the session; a request without a body
+// leaves them as they are.
 func (h *Handler) handleIssue(w http.ResponseWriter, r *http.Request) {
+	attrs, given, err := readAttributes(w, r)
+	if err != nil {
+		http.Error(w, "invalid attributes", http.StatusBadRequest)
+		return
+	}
+
 	if token, ok := tokenFromRequest(r); ok {
 		sess, err := h.svc.Verify(r.Context(), token)
+		if err == nil && given {
+			err = h.svc.SetAttributes(r.Context(), token, attrs)
+		}
 		switch {
 		case err == nil:
 			if err := h.svc.writeDeviceCookie(w, r, sess); err != nil {
@@ -65,7 +76,7 @@ func (h *Handler) handleIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	sess, err := h.svc.Issue(r.Context(), r)
+	sess, err := h.svc.Issue(r.Context(), r, attrs)
 	if err != nil {
 		slog.Error("issue session", slog.Any("error", err))
 		http.Error(w, "internal server error", http.StatusInternalServerError)
