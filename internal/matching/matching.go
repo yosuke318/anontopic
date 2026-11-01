@@ -149,18 +149,29 @@ type Attributes struct {
 	AgeBand string
 }
 
+// Location is where the address a user came from is registered. A field is
+// empty when it is not known. It is recorded with the participants of a room
+// and never read to form one; the reasoning is in
+// docs/adr/0045-locate-the-prefecture-of-a-session-with-geolite-downloaded-by-the-server.md.
+type Location struct {
+	Country    string
+	Prefecture string
+	ASN        uint32
+}
+
 // Participant is one participant of a room being formed.
 type Participant struct {
 	Token      string
 	Identity   Identity
 	Attributes Attributes
+	Location   Location
 }
 
-// Identities reads the identifiers and the attributes of the session behind
-// a token, for the users who are in a room without a request of their own
-// being served.
-type Identities interface {
-	Identity(ctx context.Context, token string) (Identity, Attributes, error)
+// Sessions reads what the session behind a token holds about its user, for
+// the users who are in a room without a request of their own being served.
+// The Token of the returned Participant is not used.
+type Sessions interface {
+	Participant(ctx context.Context, token string) (Participant, error)
 }
 
 // RequestLimiter reports whether an address may ask to be matched again now,
@@ -182,12 +193,12 @@ type BanList interface {
 
 // Service puts users in a queue and forms rooms out of it.
 type Service struct {
-	store      Store
-	repo       Repository
-	topics     TopicCatalogue
-	bans       BanList
-	identities Identities
-	rate       RequestLimiter
+	store    Store
+	repo     Repository
+	topics   TopicCatalogue
+	bans     BanList
+	sessions Sessions
+	rate     RequestLimiter
 
 	waitTTL       time.Duration
 	fallbackAfter time.Duration
@@ -207,10 +218,10 @@ type Options struct {
 	RoomTTL time.Duration
 }
 
-// NewService builds a Service. A nil identities records no identifier with
-// the participants of a room, and a nil rate limiter takes requests to be
+// NewService builds a Service. A nil sessions records nothing but the token
+// of each participant of a room, and a nil rate limiter takes requests to be
 // matched however fast they arrive.
-func NewService(store Store, repo Repository, topics TopicCatalogue, bans BanList, identities Identities, rate RequestLimiter, opts Options) *Service {
+func NewService(store Store, repo Repository, topics TopicCatalogue, bans BanList, sessions Sessions, rate RequestLimiter, opts Options) *Service {
 	if opts.WaitTTL <= 0 {
 		opts.WaitTTL = DefaultWaitTTL
 	}
@@ -226,7 +237,7 @@ func NewService(store Store, repo Repository, topics TopicCatalogue, bans BanLis
 		repo:          repo,
 		topics:        topics,
 		bans:          bans,
-		identities:    identities,
+		sessions:      sessions,
 		rate:          rate,
 		waitTTL:       opts.WaitTTL,
 		fallbackAfter: opts.FallbackAfter,
@@ -382,25 +393,25 @@ func (s *Service) form(ctx context.Context, q Queue) error {
 	return nil
 }
 
-// identify reads the identifiers and the attributes of every participant of
-// a room. A participant whose session cannot be read joins the room all the
-// same, without them: the room is already taken out of the queue, and
-// neither is needed to hold the conversation.
+// identify reads what the session of every participant of a room holds. A
+// participant whose session cannot be read joins the room all the same,
+// without it: the room is already taken out of the queue, and none of it is
+// needed to hold the conversation.
 func (s *Service) identify(ctx context.Context, tokens []string) []Participant {
 	participants := make([]Participant, len(tokens))
 	for i, token := range tokens {
 		participants[i].Token = token
-		if s.identities == nil {
+		if s.sessions == nil {
 			continue
 		}
 
-		id, attrs, err := s.identities.Identity(ctx, token)
+		p, err := s.sessions.Participant(ctx, token)
 		if err != nil {
-			slog.Warn("read the identifiers of a participant", slog.Any("error", err))
+			slog.Warn("read the session of a participant", slog.Any("error", err))
 			continue
 		}
-		participants[i].Identity = id
-		participants[i].Attributes = attrs
+		p.Token = token
+		participants[i] = p
 	}
 	return participants
 }

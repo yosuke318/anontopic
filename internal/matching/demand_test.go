@@ -42,7 +42,7 @@ func TestRedisStoreCountsTheDemandOfAQueue(t *testing.T) {
 		t.Fatalf("Remove: %v", err)
 	}
 
-	demand, err := store.Demand(ctx, demandDate(now))
+	demand, err := store.Demand(ctx, statDate(now))
 	if err != nil {
 		t.Fatalf("Demand: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestRedisStoreCountsARoomOfTwoUnderTheQueueOfThree(t *testing.T) {
 		t.Fatalf("participants = %v, want two", participants)
 	}
 
-	demand, err := store.Demand(ctx, demandDate(now))
+	demand, err := store.Demand(ctx, statDate(now))
 	if err != nil {
 		t.Fatalf("Demand: %v", err)
 	}
@@ -90,8 +90,8 @@ func TestDemandDateCutsTheDayInJapan(t *testing.T) {
 		{time.Date(2026, 11, 1, 15, 0, 0, 0, time.UTC), "2026-11-02"},
 	}
 	for _, c := range cases {
-		if got := demandDate(c.at); got != c.want {
-			t.Errorf("demandDate(%v) = %s, want %s", c.at, got, c.want)
+		if got := statDate(c.at); got != c.want {
+			t.Errorf("statDate(%v) = %s, want %s", c.at, got, c.want)
 		}
 	}
 }

@@ -178,11 +178,23 @@ Next.js のフロントエンドは同じクラスターで 1 タスク動かし
 | `/anontopic/<env>/api/REDIS_URL` | Redis の接続 URL |
 | `/anontopic/<env>/api/SESSION_IP_HASH_SECRET` | IP アドレスのハッシュに使う鍵 |
 | `/anontopic/<env>/api/ADMIN_API_TOKEN` | 管理 API の Bearer トークン |
+| `/anontopic/<env>/api/MAXMIND_ACCOUNT_ID` | MaxMind のアカウント ID。GeoLite のデータベースのダウンロードに使う（ADR-0045） |
+| `/anontopic/<env>/api/MAXMIND_LICENSE_KEY` | MaxMind のライセンスキー |
 
 ```bash
 aws ssm put-parameter --type SecureString \
   --name /anontopic/dev/api/SESSION_IP_HASH_SECRET --value "$(openssl rand -hex 32)"
 ```
+
+MaxMind のライセンスキーは、値をコマンドの履歴に残さないよう、入力して渡す。
+
+```bash
+read -rs key && aws ssm put-parameter --type SecureString \
+  --name /anontopic/dev/api/MAXMIND_LICENSE_KEY --value "$key"; unset key
+```
+
+サーバーは起動したときと、その後 1 週間ごとに、GeoLite のデータベースを MaxMind から取り直す。
+取れなかったときは、接続元の判定を飛ばして動き続け、`update the GeoLite databases` の警告をログに出す。
 
 値を変えたら、新しいデプロイでタスクを入れ替える。
 

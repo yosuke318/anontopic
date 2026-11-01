@@ -391,4 +391,4 @@ func waitingKey(token string) string { return waitingKeyPrefix + token }
 
 func roomKey(token string) string { return roomKeyPrefix + token }
 
-func demandKey(t time.Time) string { return demandKeyPrefix + demandDate(t) }
+func demandKey(t time.Time) string { return demandKeyPrefix + statDate(t) }

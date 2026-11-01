@@ -255,18 +255,24 @@ func (b fakeBans) IsBanned(_ context.Context, id Identity) (bool, error) {
 	return slices.Contains(b.banned, id.IPHash) || slices.Contains(b.banned, id.Device), nil
 }
 
-// fakeIdentities names every token's identifiers after the token, answers
-// the attributes in attributes, and knows nothing of the tokens in missing.
-type fakeIdentities struct {
+// fakeParticipants names every token's identifiers after the token, answers the
+// attributes in attributes and the locations in locations, and knows nothing
+// of the tokens in missing.
+type fakeParticipants struct {
 	missing    []string
 	attributes map[string]Attributes
+	locations  map[string]Location
 }
 
-func (f fakeIdentities) Identity(_ context.Context, token string) (Identity, Attributes, error) {
+func (f fakeParticipants) Participant(_ context.Context, token string) (Participant, error) {
 	if slices.Contains(f.missing, token) {
-		return Identity{}, Attributes{}, errors.New("no such session")
+		return Participant{}, errors.New("no such session")
 	}
-	return Identity{IPHash: "ip-hash-" + token, Device: "device-" + token}, f.attributes[token], nil
+	return Participant{
+		Identity:   Identity{IPHash: "ip-hash-" + token, Device: "device-" + token},
+		Attributes: f.attributes[token],
+		Location:   f.locations[token],
+	}, nil
 }
 
 // newTestService builds a Service whose clock the test drives.
@@ -610,7 +616,7 @@ func TestJoinKeepsABannedDeviceOutOfTheQueue(t *testing.T) {
 func TestARoomRecordsTheIdentifiersOfItsParticipants(t *testing.T) {
 	repo := newFakeRepository()
 	svc := NewService(newFakeStore(), repo, fakeTopics{active: []int{1}}, fakeBans{},
-		fakeIdentities{missing: []string{"bob"}}, nil, Options{})
+		fakeParticipants{missing: []string{"bob"}}, nil, Options{})
 	q := Queue{TopicID: 1, RoomType: 2}
 
 	join(t, svc, "alice", q)
@@ -629,17 +635,25 @@ func TestARoomRecordsTheIdentifiersOfItsParticipants(t *testing.T) {
 	}
 }
 
-func TestARoomRecordsTheAttributesWithoutFormingOnThem(t *testing.T) {
+func TestARoomRecordsTheAttributesAndTheLocationWithoutFormingOnThem(t *testing.T) {
 	repo := newFakeRepository()
 	svc := NewService(newFakeStore(), repo, fakeTopics{active: []int{1}}, fakeBans{},
-		fakeIdentities{attributes: map[string]Attributes{
-			"alice": {Gender: "female", AgeBand: "20s"},
-			"bob":   {Gender: "female", AgeBand: "20s"},
-			"carol": {Gender: "male", AgeBand: "50s"},
-		}}, nil, Options{})
+		fakeParticipants{
+			attributes: map[string]Attributes{
+				"alice": {Gender: "female", AgeBand: "20s"},
+				"bob":   {Gender: "female", AgeBand: "20s"},
+				"carol": {Gender: "male", AgeBand: "50s"},
+			},
+			locations: map[string]Location{
+				"alice": {Country: "JP", Prefecture: "JP-13", ASN: 2516},
+				"bob":   {Country: "JP", Prefecture: "JP-13", ASN: 2516},
+				"carol": {Country: "JP", Prefecture: "JP-47", ASN: 17676},
+			},
+		}, nil, Options{})
 	q := Queue{TopicID: 1, RoomType: 2}
 
-	// The room is formed in arrival order, whatever the users answered.
+	// The room is formed in arrival order, whatever the users answered and
+	// wherever they came from.
 	join(t, svc, "alice", q)
 	state := join(t, svc, "carol", q)
 	if state.Kind != StateMatched {
@@ -648,9 +662,11 @@ func TestARoomRecordsTheAttributesWithoutFormingOnThem(t *testing.T) {
 
 	want := []Participant{
 		{Token: "alice", Identity: Identity{IPHash: "ip-hash-alice", Device: "device-alice"},
-			Attributes: Attributes{Gender: "female", AgeBand: "20s"}},
+			Attributes: Attributes{Gender: "female", AgeBand: "20s"},
+			Location:   Location{Country: "JP", Prefecture: "JP-13", ASN: 2516}},
 		{Token: "carol", Identity: Identity{IPHash: "ip-hash-carol", Device: "device-carol"},
-			Attributes: Attributes{Gender: "male", AgeBand: "50s"}},
+			Attributes: Attributes{Gender: "male", AgeBand: "50s"},
+			Location:   Location{Country: "JP", Prefecture: "JP-47", ASN: 17676}},
 	}
 	if got := repo.participants[state.Conversation.ID]; !slices.Equal(got, want) {
 		t.Fatalf("participants = %+v, want %+v", got, want)
