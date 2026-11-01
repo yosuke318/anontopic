@@ -51,7 +51,6 @@ FROM (VALUES
     ('下ネタ', 'sexual'),
     ('童貞', 'sexual'),
     ('処女', 'sexual'),
-    ('裸', 'sexual'),
     ('巨乳', 'sexual'),
 
     -- 外部連絡先の交換
@@ -94,8 +93,6 @@ FROM (VALUES
     ('skype', 'contact'),
 
     -- 勧誘・スパム
-    ('稼げ', 'solicitation'),
-    ('副業', 'solicitation'),
     ('儲か', 'solicitation'),
     ('高収入', 'solicitation'),
     ('無料登録', 'solicitation'),
