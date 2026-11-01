@@ -89,7 +89,7 @@ export default function HomePage() {
       />
 
       <section className="mx-auto w-full max-w-5xl px-5 py-16 sm:py-24">
-        <p className="text-brand-ink text-sm font-semibold tracking-wide">{siteTagline}</p>
+        <p className="text-brand-ink text-sm font-bold tracking-wide">{siteTagline}</p>
         <h1 className="mt-4 max-w-2xl text-4xl leading-tight font-bold tracking-tight sm:text-5xl">
           話したいことだけを持って、
           <br />
