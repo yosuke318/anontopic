@@ -333,7 +333,7 @@ func (s *Service) State(ctx context.Context, token string) (State, error) {
 // grace, and the reasoning is in
 // docs/adr/0011-end-a-conversation-after-a-rejoin-grace.md.
 func (s *Service) Leave(ctx context.Context, token string) error {
-	if err := s.store.Remove(ctx, token); err != nil {
+	if err := s.store.Remove(ctx, token, s.now().UTC()); err != nil {
 		return fmt.Errorf("remove from queue: %w", err)
 	}
 	if err := s.store.Discard(ctx, []string{token}); err != nil {

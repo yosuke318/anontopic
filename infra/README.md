@@ -379,11 +379,13 @@ EventBridge Scheduler が毎日 05:00（日本時間）に ECS のタスクと�
 タスク定義は API のファミリーの最新のリビジョンで、コマンドだけを `/retention` に替える。
 デプロイで新しいイメージを入れれば、次の実行からそのイメージで動く。
 
+同じ実行で、Redis で数えたトピック別の需要の過去 7 日分を `topic_daily_stats` に書き写す（ADR-0043）。
+
 ログは API と同じ `/ecs/anontopic-<env>-api` に出る。retention のタスクは `started-by` が
 `scheduler-retention` になる。
 
 手で動かすときは、Scheduler と同じ要求を `run-task` で送る。`-dry-run` を付けると、作る
-パーティションと消すパーティションを出すだけで、何も変えない。
+パーティションと消すパーティション、書き写す需要の日を出すだけで、何も変えない。
 
 ```bash
 env=dev

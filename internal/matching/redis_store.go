@@ -14,6 +14,7 @@ const (
 	queueKeyPrefix   = "matching:queue:"
 	waitingKeyPrefix = "matching:waiting:"
 	roomKeyPrefix    = "matching:room:"
+	demandKeyPrefix  = "matching:demand:"
 
 	fieldTopicID        = "topic_id"
 	fieldRoomType       = "room_type"
@@ -26,6 +27,11 @@ const (
 	// participants nothing to join, so the room disappears and they can queue
 	// again instead of waiting for a conversation that will never come.
 	formingTTL = 30 * time.Second
+
+	// demandTTL is how long the counts of one day stay in Redis after they
+	// were last written. The daily batch reads the days of the past week, so
+	// a week of failed runs loses nothing.
+	demandTTL = 8 * 24 * time.Hour
 )
 
 // enqueueScript places a token in a queue, refusing the tokens that are busy
@@ -34,11 +40,13 @@ var enqueueScript = redis.NewScript(`
 local waitingKey = KEYS[1]
 local roomKey = KEYS[2]
 local queueKey = KEYS[3]
+local demandKey = KEYS[4]
 local token = ARGV[1]
 local topicID = ARGV[2]
 local roomType = ARGV[3]
 local now = ARGV[4]
 local ttl = ARGV[5]
+local demandTTL = ARGV[6]
 
 if redis.call('EXISTS', roomKey) == 1 then
 	return 'matched'
@@ -58,6 +66,8 @@ end
 redis.call('HSET', waitingKey, 'topic_id', topicID, 'room_type', roomType, 'since', now)
 redis.call('PEXPIRE', waitingKey, ttl)
 redis.call('ZADD', queueKey, now, token)
+redis.call('HINCRBY', demandKey, topicID .. ':' .. roomType .. ':queued', 1)
+redis.call('PEXPIRE', demandKey, demandTTL)
 return 'queued'
 `)
 
@@ -76,8 +86,13 @@ const (
 // It writes the keys of the participants it pops, which are not in KEYS
 // because they are only known once the queue has been read. That is why the
 // queues have to live on a single Redis node.
+//
+// The participants are counted as matched under the queue they waited in,
+// so a room of two formed out of a queue of three counts under the queue of
+// three.
 var formRoomScript = redis.NewScript(`
 local queueKey = KEYS[1]
+local demandKey = KEYS[2]
 local size = tonumber(ARGV[1])
 local timeoutBefore = ARGV[2]
 local fallbackBefore = tonumber(ARGV[3])
@@ -85,6 +100,8 @@ local waitingPrefix = ARGV[4]
 local roomPrefix = ARGV[5]
 local formingTTL = ARGV[6]
 local topicID = ARGV[7]
+local now = tonumber(ARGV[8])
+local demandTTL = ARGV[9]
 
 -- A token whose wait ran out leaves the queue. Its waiting key holds the same
 -- lifetime and expires on its own.
@@ -107,24 +124,33 @@ end
 
 local popped = redis.call('ZPOPMIN', queueKey, take)
 local participants = {}
+local waited = 0
 for i = 1, #popped, 2 do
 	local token = popped[i]
 	participants[#participants + 1] = token
+	waited = waited + now - math.floor(tonumber(popped[i + 1]))
 	redis.call('DEL', waitingPrefix .. token)
 	redis.call('HSET', roomPrefix .. token,
 		'topic_id', topicID, 'room_type', tostring(take), 'since', popped[i + 1])
 	redis.call('PEXPIRE', roomPrefix .. token, formingTTL)
 end
+
+local demandField = topicID .. ':' .. ARGV[1] .. ':'
+redis.call('HINCRBY', demandKey, demandField .. 'matched', take)
+redis.call('HINCRBY', demandKey, demandField .. 'wait_ms', waited)
+redis.call('PEXPIRE', demandKey, demandTTL)
 return participants
 `)
 
 // removeScript takes a token out of the queue its waiting key points at, so
 // that a user who gives up leaves no entry behind for a room to be formed out
-// of.
+// of, and counts the user as having left that queue.
 var removeScript = redis.NewScript(`
 local waitingKey = KEYS[1]
+local demandKey = KEYS[2]
 local token = ARGV[1]
 local queuePrefix = ARGV[2]
+local demandTTL = ARGV[3]
 
 local waiting = redis.call('HMGET', waitingKey, 'topic_id', 'room_type')
 if not waiting[1] then
@@ -133,6 +159,8 @@ end
 
 redis.call('DEL', waitingKey)
 redis.call('ZREM', queuePrefix .. waiting[1] .. ':' .. waiting[2], token)
+redis.call('HINCRBY', demandKey, waiting[1] .. ':' .. waiting[2] .. ':left', 1)
+redis.call('PEXPIRE', demandKey, demandTTL)
 return 1
 `)
 
@@ -153,13 +181,14 @@ func NewRedisStore(client redis.UniversalClient) *RedisStore {
 
 // Enqueue puts token in the queue q names.
 func (s *RedisStore) Enqueue(ctx context.Context, token string, q Queue, now time.Time, ttl time.Duration) error {
-	keys := []string{waitingKey(token), roomKey(token), queueKey(q)}
+	keys := []string{waitingKey(token), roomKey(token), queueKey(q), demandKey(now)}
 	args := []any{
 		token,
 		strconv.Itoa(q.TopicID),
 		strconv.Itoa(q.RoomType),
 		strconv.FormatInt(now.UnixMilli(), 10),
 		strconv.FormatInt(ttl.Milliseconds(), 10),
+		strconv.FormatInt(demandTTL.Milliseconds(), 10),
 	}
 
 	code, err := enqueueScript.Run(ctx, s.client, keys, args...).Text()
@@ -189,9 +218,12 @@ func (s *RedisStore) FormRoom(ctx context.Context, q Queue, now time.Time, ttl, 
 		roomKeyPrefix,
 		strconv.FormatInt(formingTTL.Milliseconds(), 10),
 		strconv.Itoa(q.TopicID),
+		strconv.FormatInt(now.UnixMilli(), 10),
+		strconv.FormatInt(demandTTL.Milliseconds(), 10),
 	}
 
-	participants, err := formRoomScript.Run(ctx, s.client, []string{queueKey(q)}, args...).StringSlice()
+	keys := []string{queueKey(q), demandKey(now)}
+	participants, err := formRoomScript.Run(ctx, s.client, keys, args...).StringSlice()
 	if err != nil {
 		return nil, fmt.Errorf("form room: %w", err)
 	}
@@ -251,10 +283,11 @@ func (s *RedisStore) Lookup(ctx context.Context, token string) (State, error) {
 }
 
 // Remove takes token out of the queue it waits in.
-func (s *RedisStore) Remove(ctx context.Context, token string) error {
-	args := []any{token, queueKeyPrefix}
+func (s *RedisStore) Remove(ctx context.Context, token string, now time.Time) error {
+	keys := []string{waitingKey(token), demandKey(now)}
+	args := []any{token, queueKeyPrefix, strconv.FormatInt(demandTTL.Milliseconds(), 10)}
 
-	if err := removeScript.Run(ctx, s.client, []string{waitingKey(token)}, args...).Err(); err != nil {
+	if err := removeScript.Run(ctx, s.client, keys, args...).Err(); err != nil {
 		return fmt.Errorf("remove from queue: %w", err)
 	}
 	return nil
@@ -357,3 +390,5 @@ func queueKey(q Queue) string {
 func waitingKey(token string) string { return waitingKeyPrefix + token }
 
 func roomKey(token string) string { return roomKeyPrefix + token }
+
+func demandKey(t time.Time) string { return demandKeyPrefix + demandDate(t) }

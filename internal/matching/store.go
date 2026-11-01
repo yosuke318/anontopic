@@ -37,9 +37,10 @@ type Store interface {
 	// Lookup returns what token is currently doing.
 	Lookup(ctx context.Context, token string) (State, error)
 
-	// Remove takes token out of the queue it waits in. Removing a token that
-	// waits nowhere is not an error.
-	Remove(ctx context.Context, token string) error
+	// Remove takes token out of the queue it waits in and counts it as having
+	// left that queue on the day now falls on. Removing a token that waits
+	// nowhere is not an error.
+	Remove(ctx context.Context, token string, now time.Time) error
 
 	// CountWaiting returns how many users wait in each queue, leaving out
 	// the ones whose wait passed ttl. A queue nobody waits in answers zero.
