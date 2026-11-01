@@ -54,9 +54,9 @@ services:
       SESSION_IP_HASH_SECRET: ${SESSION_IP_HASH_SECRET:-local-development-secret}
       # 上限に達したときの挙動を、1,000 本つながずに確かめられるようにしておく。
       CAPACITY_MAX_CONNECTIONS: ${CAPACITY_MAX_CONNECTIONS:-1000}
-      CAPACITY_MAX_CONNECTIONS_PER_IP: ${CAPACITY_MAX_CONNECTIONS_PER_IP:-5}
+      CAPACITY_MAX_CONNECTIONS_PER_IP: ${CAPACITY_MAX_CONNECTIONS_PER_IP:-20}
       # 負荷試験は 1 台のクライアントから全員分のマッチングを要求するため、上げられるようにしておく。
-      CAPACITY_MATCH_BURST: ${CAPACITY_MATCH_BURST:-3}
+      CAPACITY_MATCH_BURST: ${CAPACITY_MATCH_BURST:-10}
       # 辞書を SQL で直しながら確かめられるよう、読み直す間隔を .env から縮められるようにする。
       MODERATION_RELOAD_INTERVAL: ${MODERATION_RELOAD_INTERVAL:-5m}
       # 警告から恒久停止までを、何十通も送らずに確かめられるようにしておく。

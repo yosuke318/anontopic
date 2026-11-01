@@ -35,8 +35,10 @@ const (
 
 	// DefaultPerIPHash is how many of those connections one hashed address
 	// may hold. It leaves room for the several tabs and the several people a
-	// household or an office shares one address with.
-	DefaultPerIPHash = 5
+	// household or an office shares one address with, and for the users of a
+	// mobile carrier, who reach the service from an IPv4 address the carrier
+	// shares among many of its subscribers.
+	DefaultPerIPHash = 20
 
 	// DefaultLeaseTTL is how long a connection stays counted without renewing
 	// its lease. It outlasts several renewals, so that a server under load
@@ -73,8 +75,10 @@ var (
 	DefaultMessageLimit = Limit{Burst: 5, Interval: time.Second}
 
 	// DefaultMatchLimit is how often one hashed address may ask to be
-	// matched: a few tries in a row, and then one per ten seconds.
-	DefaultMatchLimit = Limit{Burst: 3, Interval: 10 * time.Second}
+	// matched: ten tries in a row, and then one per two seconds. Like
+	// DefaultPerIPHash, it is shared by everyone behind one address of a
+	// mobile carrier.
+	DefaultMatchLimit = Limit{Burst: 10, Interval: 2 * time.Second}
 
 	// DefaultClaimLimit is how often one hashed address may file a rights
 	// infringement claim: a few in a row, and then one per ten minutes. The
