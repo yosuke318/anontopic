@@ -255,17 +255,18 @@ func (b fakeBans) IsBanned(_ context.Context, id Identity) (bool, error) {
 	return slices.Contains(b.banned, id.IPHash) || slices.Contains(b.banned, id.Device), nil
 }
 
-// fakeIdentities names every token's identifiers after the token, and knows
-// nothing of the tokens in missing.
+// fakeIdentities names every token's identifiers after the token, answers
+// the attributes in attributes, and knows nothing of the tokens in missing.
 type fakeIdentities struct {
-	missing []string
+	missing    []string
+	attributes map[string]Attributes
 }
 
-func (f fakeIdentities) Identity(_ context.Context, token string) (Identity, error) {
+func (f fakeIdentities) Identity(_ context.Context, token string) (Identity, Attributes, error) {
 	if slices.Contains(f.missing, token) {
-		return Identity{}, errors.New("no such session")
+		return Identity{}, Attributes{}, errors.New("no such session")
 	}
-	return Identity{IPHash: "ip-hash-" + token, Device: "device-" + token}, nil
+	return Identity{IPHash: "ip-hash-" + token, Device: "device-" + token}, f.attributes[token], nil
 }
 
 // newTestService builds a Service whose clock the test drives.
@@ -622,6 +623,34 @@ func TestARoomRecordsTheIdentifiersOfItsParticipants(t *testing.T) {
 	want := []Participant{
 		{Token: "alice", Identity: Identity{IPHash: "ip-hash-alice", Device: "device-alice"}},
 		{Token: "bob"},
+	}
+	if got := repo.participants[state.Conversation.ID]; !slices.Equal(got, want) {
+		t.Fatalf("participants = %+v, want %+v", got, want)
+	}
+}
+
+func TestARoomRecordsTheAttributesWithoutFormingOnThem(t *testing.T) {
+	repo := newFakeRepository()
+	svc := NewService(newFakeStore(), repo, fakeTopics{active: []int{1}}, fakeBans{},
+		fakeIdentities{attributes: map[string]Attributes{
+			"alice": {Gender: "female", AgeBand: "20s"},
+			"bob":   {Gender: "female", AgeBand: "20s"},
+			"carol": {Gender: "male", AgeBand: "50s"},
+		}}, nil, Options{})
+	q := Queue{TopicID: 1, RoomType: 2}
+
+	// The room is formed in arrival order, whatever the users answered.
+	join(t, svc, "alice", q)
+	state := join(t, svc, "carol", q)
+	if state.Kind != StateMatched {
+		t.Fatalf("state = %+v, want matched", state)
+	}
+
+	want := []Participant{
+		{Token: "alice", Identity: Identity{IPHash: "ip-hash-alice", Device: "device-alice"},
+			Attributes: Attributes{Gender: "female", AgeBand: "20s"}},
+		{Token: "carol", Identity: Identity{IPHash: "ip-hash-carol", Device: "device-carol"},
+			Attributes: Attributes{Gender: "male", AgeBand: "50s"}},
 	}
 	if got := repo.participants[state.Conversation.ID]; !slices.Equal(got, want) {
 		t.Fatalf("participants = %+v, want %+v", got, want)

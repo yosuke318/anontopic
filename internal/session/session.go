@@ -64,6 +64,8 @@ type Session struct {
 	IssuedAt time.Time
 	// ExpiresAt is when the session dies if it is not used again.
 	ExpiresAt time.Time
+	// Attributes is what the user chose to tell about themselves.
+	Attributes Attributes
 }
 
 // Service issues, verifies and revokes sessions.
@@ -123,9 +125,14 @@ func NewService(store Store, ipHashKey []byte, opts Options) *Service {
 	}
 }
 
-// Issue creates a session for the client behind r. A client that holds no
-// device ID is given a new one with the session.
-func (s *Service) Issue(ctx context.Context, r *http.Request) (Session, error) {
+// Issue creates a session for the client behind r, holding the attributes
+// the user gave. A client that holds no device ID is given a new one with the
+// session.
+func (s *Service) Issue(ctx context.Context, r *http.Request, attrs Attributes) (Session, error) {
+	if err := attrs.validate(); err != nil {
+		return Session{}, err
+	}
+
 	token, err := newToken()
 	if err != nil {
 		return Session{}, err
@@ -139,7 +146,7 @@ func (s *Service) Issue(ctx context.Context, r *http.Request) (Session, error) {
 	}
 
 	issuedAt := s.now().UTC()
-	rec := Record{IPHash: s.IPHash(r), Device: device, IssuedAt: issuedAt}
+	rec := Record{IPHash: s.IPHash(r), Device: device, IssuedAt: issuedAt, Attributes: attrs}
 	ttl := min(s.idleTTL, s.absoluteTTL)
 
 	if err := s.store.Create(ctx, token, rec, ttl); err != nil {
@@ -147,11 +154,12 @@ func (s *Service) Issue(ctx context.Context, r *http.Request) (Session, error) {
 	}
 
 	return Session{
-		Token:     token,
-		IPHash:    rec.IPHash,
-		Device:    rec.Device,
-		IssuedAt:  issuedAt,
-		ExpiresAt: issuedAt.Add(ttl),
+		Token:      token,
+		IPHash:     rec.IPHash,
+		Device:     rec.Device,
+		IssuedAt:   issuedAt,
+		ExpiresAt:  issuedAt.Add(ttl),
+		Attributes: attrs,
 	}, nil
 }
 
@@ -188,17 +196,18 @@ func (s *Service) Verify(ctx context.Context, token string) (Session, error) {
 	}
 
 	return Session{
-		Token:     token,
-		IPHash:    rec.IPHash,
-		Device:    rec.Device,
-		IssuedAt:  rec.IssuedAt,
-		ExpiresAt: now.Add(ttl),
+		Token:      token,
+		IPHash:     rec.IPHash,
+		Device:     rec.Device,
+		IssuedAt:   rec.IssuedAt,
+		ExpiresAt:  now.Add(ttl),
+		Attributes: rec.Attributes,
 	}, nil
 }
 
 // Lookup reads what token stands for without extending its idle window. It
-// is how another module reads the identifiers of a participant whose request
-// it is not serving.
+// is how another module reads the identifiers and the attributes of a
+// participant whose request it is not serving.
 func (s *Service) Lookup(ctx context.Context, token string) (Session, error) {
 	if !wellFormed(token) {
 		return Session{}, ErrInvalidSession
@@ -212,7 +221,13 @@ func (s *Service) Lookup(ctx context.Context, token string) (Session, error) {
 		return Session{}, fmt.Errorf("read session: %w", err)
 	}
 
-	return Session{Token: token, IPHash: rec.IPHash, Device: rec.Device, IssuedAt: rec.IssuedAt}, nil
+	return Session{
+		Token:      token,
+		IPHash:     rec.IPHash,
+		Device:     rec.Device,
+		IssuedAt:   rec.IssuedAt,
+		Attributes: rec.Attributes,
+	}, nil
 }
 
 // Authenticate resolves the session carried by r and returns its token. It is

@@ -5,6 +5,13 @@ import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
 
 import { ApiError } from "@/lib/api";
+import {
+  ageBandOptions,
+  attributesNotice,
+  genderOptions,
+  type AgeBand,
+  type Gender,
+} from "@/lib/attributes";
 import { issueSession, joinQueue, roomTypes, type RoomType } from "@/lib/matching";
 import { acceptTerms, useTermsAccepted } from "@/lib/terms-consent";
 import type { Topic } from "@/lib/topics";
@@ -23,7 +30,7 @@ function messageForError(error: unknown): string {
   if (error instanceof ApiError) {
     switch (error.status) {
       case 400:
-        return "選んだトピックが見つかりませんでした。画面を再読み込みしてから選び直してください。";
+        return "選んだ内容を受け付けられませんでした。画面を再読み込みしてから選び直してください。";
       case 401:
         return "セッションを用意できませんでした。もう一度お試しください。";
       case 403:
@@ -43,6 +50,8 @@ export function TopicPicker({ topics }: { topics: Topic[] }) {
   const router = useRouter();
   const [topicId, setTopicId] = useState<number | null>(null);
   const [roomType, setRoomType] = useState<RoomType>(3);
+  const [gender, setGender] = useState<Gender | "">("");
+  const [ageBand, setAgeBand] = useState<AgeBand | "">("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const termsAccepted = useTermsAccepted();
@@ -61,7 +70,7 @@ export function TopicPicker({ topics }: { topics: Topic[] }) {
       if (!termsAccepted) {
         acceptTerms();
       }
-      await issueSession();
+      await issueSession({ gender: gender || null, age_band: ageBand || null });
       await joinQueue(topicId, roomType);
       router.push("/waiting");
     } catch (err) {
@@ -130,6 +139,48 @@ export function TopicPicker({ topics }: { topics: Topic[] }) {
               </span>
             </label>
           ))}
+        </div>
+      </fieldset>
+
+      <fieldset className="mt-12">
+        <legend className="text-xl font-bold tracking-tight">
+          あなたについて<span className="text-muted ml-2 text-sm font-medium">任意</span>
+        </legend>
+        <p className="text-muted mt-2 leading-7">
+          利用状況の把握と荒らしの対策に使います。{attributesNotice}
+          答えなくても話しはじめられます。
+        </p>
+        <div className="mt-6 grid gap-4 sm:grid-cols-2">
+          <label className="block">
+            <span className="text-sm font-medium">性別</span>
+            <select
+              value={gender}
+              onChange={(event) => setGender(event.target.value as Gender | "")}
+              className="border-line bg-background focus:outline-brand mt-2 block h-11 w-full rounded-xl border px-3 focus:outline-2 focus:outline-offset-2"
+            >
+              <option value="">答えない</option>
+              {genderOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="text-sm font-medium">年代</span>
+            <select
+              value={ageBand}
+              onChange={(event) => setAgeBand(event.target.value as AgeBand | "")}
+              className="border-line bg-background focus:outline-brand mt-2 block h-11 w-full rounded-xl border px-3 focus:outline-2 focus:outline-offset-2"
+            >
+              <option value="">答えない</option>
+              {ageBandOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
       </fieldset>
 

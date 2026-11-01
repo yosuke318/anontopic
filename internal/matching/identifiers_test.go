@@ -134,3 +134,87 @@ func TestEraseIdentifiersClearsOnlyTheNamedConversationsOlderThanTheCutoff(t *te
 		t.Fatalf("IdentifiedBefore still lists %s after its identifiers were erased", erased)
 	}
 }
+
+func TestEraseIdentifiersClearsTheAttributesToo(t *testing.T) {
+	repo := postgresTestRepository(t)
+	ctx := t.Context()
+
+	cutoff := time.Date(2000, 7, 1, 0, 0, 0, 0, time.UTC)
+	conv := testIdentifiedConversation(t, repo, cutoff.Add(-48*time.Hour))
+
+	// A participant who answered only the attributes, with no identifier
+	// left, is still found and cleared.
+	if _, err := repo.pool.Exec(ctx,
+		"UPDATE conversation_participants SET ip_hash = NULL, device_fingerprint = NULL, "+
+			"gender = 'female', age_band = '20s' WHERE conversation_id = $1", conv); err != nil {
+		t.Fatalf("set attributes: %v", err)
+	}
+
+	ids, err := repo.IdentifiedBefore(ctx, cutoff)
+	if err != nil {
+		t.Fatalf("IdentifiedBefore: %v", err)
+	}
+	if !slices.Contains(ids, conv) {
+		t.Fatalf("IdentifiedBefore = %v, want %s", ids, conv)
+	}
+
+	if n, err := repo.EraseIdentifiers(ctx, cutoff, []string{conv}); err != nil || n != 2 {
+		t.Fatalf("EraseIdentifiers = %d, %v, want 2 participants", n, err)
+	}
+
+	var answered int
+	if err := repo.pool.QueryRow(ctx,
+		"SELECT count(*) FROM conversation_participants "+
+			"WHERE conversation_id = $1 AND (gender IS NOT NULL OR age_band IS NOT NULL)",
+		conv).Scan(&answered); err != nil {
+		t.Fatalf("count answered participants: %v", err)
+	}
+	if answered != 0 {
+		t.Fatalf("%d participants keep their attributes, want none", answered)
+	}
+}
+
+func TestCreateConversationRecordsTheAttributes(t *testing.T) {
+	repo := postgresTestRepository(t)
+	ctx := t.Context()
+
+	conv := testIdentifiedConversation(t, repo, time.Now())
+	var topicID int
+	if err := repo.pool.QueryRow(ctx, "SELECT topic_id FROM conversations WHERE id = $1", conv).Scan(&topicID); err != nil {
+		t.Fatalf("read topic: %v", err)
+	}
+
+	answered, err := repo.CreateConversation(ctx, topicID, []Participant{
+		{Token: fmt.Sprintf("a-%d", rand.Int64()), Attributes: Attributes{Gender: "other", AgeBand: "under_18"}},
+		{Token: fmt.Sprintf("b-%d", rand.Int64())},
+	})
+	if err != nil {
+		t.Fatalf("CreateConversation: %v", err)
+	}
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = repo.pool.Exec(ctx, "DELETE FROM conversation_participants WHERE conversation_id = $1", answered.ID)
+		_, _ = repo.pool.Exec(ctx, "DELETE FROM conversations WHERE id = $1", answered.ID)
+	})
+
+	rows, err := repo.pool.Query(ctx,
+		"SELECT coalesce(gender, ''), coalesce(age_band, '') FROM conversation_participants "+
+			"WHERE conversation_id = $1 ORDER BY gender NULLS LAST", answered.ID)
+	if err != nil {
+		t.Fatalf("read participants: %v", err)
+	}
+	defer rows.Close()
+
+	var got []Attributes
+	for rows.Next() {
+		var a Attributes
+		if err := rows.Scan(&a.Gender, &a.AgeBand); err != nil {
+			t.Fatalf("scan participant: %v", err)
+		}
+		got = append(got, a)
+	}
+	want := []Attributes{{Gender: "other", AgeBand: "under_18"}, {}}
+	if !slices.Equal(got, want) {
+		t.Fatalf("attributes = %+v, want %+v", got, want)
+	}
+}

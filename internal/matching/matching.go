@@ -140,16 +140,27 @@ type Identity struct {
 	Device string
 }
 
-// Participant is one participant of a room being formed.
-type Participant struct {
-	Token    string
-	Identity Identity
+// Attributes is the gender and the age band a user chose to give. Either
+// field is empty when the user did not answer it. They are recorded with the
+// participants of a room and never read to form one; the reasoning is in
+// docs/adr/0044-record-the-gender-and-age-band-a-user-chose-to-give-without-matching-on-them.md.
+type Attributes struct {
+	Gender  string
+	AgeBand string
 }
 
-// Identities reads the identifiers of the session behind a token, for the
-// users who are in a room without a request of their own being served.
+// Participant is one participant of a room being formed.
+type Participant struct {
+	Token      string
+	Identity   Identity
+	Attributes Attributes
+}
+
+// Identities reads the identifiers and the attributes of the session behind
+// a token, for the users who are in a room without a request of their own
+// being served.
 type Identities interface {
-	Identity(ctx context.Context, token string) (Identity, error)
+	Identity(ctx context.Context, token string) (Identity, Attributes, error)
 }
 
 // RequestLimiter reports whether an address may ask to be matched again now,
@@ -371,10 +382,10 @@ func (s *Service) form(ctx context.Context, q Queue) error {
 	return nil
 }
 
-// identify reads the identifiers of every participant of a room. A
-// participant whose identifiers cannot be read joins the room all the same,
-// without them: the room is already taken out of the queue, and the
-// identifiers only matter to a sanction that may never come.
+// identify reads the identifiers and the attributes of every participant of
+// a room. A participant whose session cannot be read joins the room all the
+// same, without them: the room is already taken out of the queue, and
+// neither is needed to hold the conversation.
 func (s *Service) identify(ctx context.Context, tokens []string) []Participant {
 	participants := make([]Participant, len(tokens))
 	for i, token := range tokens {
@@ -383,12 +394,13 @@ func (s *Service) identify(ctx context.Context, tokens []string) []Participant {
 			continue
 		}
 
-		id, err := s.identities.Identity(ctx, token)
+		id, attrs, err := s.identities.Identity(ctx, token)
 		if err != nil {
 			slog.Warn("read the identifiers of a participant", slog.Any("error", err))
 			continue
 		}
 		participants[i].Identity = id
+		participants[i].Attributes = attrs
 	}
 	return participants
 }

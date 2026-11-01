@@ -234,18 +234,20 @@ func (b matchingBans) IsBanned(ctx context.Context, id matching.Identity) (bool,
 	return b.bans.IsBanned(ctx, report.Identity(id))
 }
 
-// sessionIdentities reads the identifiers of a waiting user out of the
-// session module, for the matching module to record with the room.
+// sessionIdentities reads the identifiers and the attributes of a waiting
+// user out of the session module, for the matching module to record with the
+// room.
 type sessionIdentities struct {
 	sessions *session.Service
 }
 
-func (s sessionIdentities) Identity(ctx context.Context, token string) (matching.Identity, error) {
+func (s sessionIdentities) Identity(ctx context.Context, token string) (matching.Identity, matching.Attributes, error) {
 	sess, err := s.sessions.Lookup(ctx, token)
 	if err != nil {
-		return matching.Identity{}, err
+		return matching.Identity{}, matching.Attributes{}, err
 	}
-	return matching.Identity{IPHash: sess.IPHash, Device: sess.Device}, nil
+	return matching.Identity{IPHash: sess.IPHash, Device: sess.Device},
+		matching.Attributes(sess.Attributes), nil
 }
 
 // chatSanctions carries what the chat module asks of the ban list to the

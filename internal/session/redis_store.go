@@ -17,7 +17,19 @@ const (
 	fieldIPHash   = "ip_hash"
 	fieldDevice   = "device"
 	fieldIssuedAt = "issued_at"
+	fieldGender   = "gender"
+	fieldAgeBand  = "age_band"
 )
+
+// setAttributesScript writes the attributes of a session that still exists.
+// Writing a field of an expired key would bring the key back without a TTL.
+var setAttributesScript = redis.NewScript(`
+if redis.call('EXISTS', KEYS[1]) == 0 then
+	return 0
+end
+redis.call('HSET', KEYS[1], 'gender', ARGV[1], 'age_band', ARGV[2])
+return 1
+`)
 
 // RedisStore keeps sessions in Redis and lets its TTL express the idle window.
 type RedisStore struct {
@@ -38,6 +50,8 @@ func (s *RedisStore) Create(ctx context.Context, token string, rec Record, ttl t
 		fieldIPHash, rec.IPHash,
 		fieldDevice, rec.Device,
 		fieldIssuedAt, strconv.FormatInt(rec.IssuedAt.UnixNano(), 10),
+		fieldGender, rec.Attributes.Gender,
+		fieldAgeBand, rec.Attributes.AgeBand,
 	)
 	pipe.Expire(ctx, sessionKey, ttl)
 	touchIndex(ctx, pipe, rec.IPHash, token, ttl)
@@ -79,7 +93,24 @@ func (s *RedisStore) Get(ctx context.Context, token string) (Record, error) {
 		IPHash:   fields[fieldIPHash],
 		Device:   fields[fieldDevice],
 		IssuedAt: time.Unix(0, nanos).UTC(),
+		Attributes: Attributes{
+			Gender:  fields[fieldGender],
+			AgeBand: fields[fieldAgeBand],
+		},
 	}, nil
+}
+
+// SetAttributes writes the attributes of an existing session.
+func (s *RedisStore) SetAttributes(ctx context.Context, token string, attrs Attributes) error {
+	written, err := setAttributesScript.Run(ctx, s.client, []string{sessionKeyPrefix + token},
+		attrs.Gender, attrs.AgeBand).Int()
+	if err != nil {
+		return fmt.Errorf("set session attributes: %w", err)
+	}
+	if written == 0 {
+		return ErrNotStored
+	}
+	return nil
 }
 
 // Refresh moves the expiry of an existing session and of the index that a ban

@@ -82,9 +82,21 @@ paths:
         セッションより長く残り、`banned_identifiers`の `device_fingerprint`として
         段階的制裁の対象になる。理由は
         [ADR-0025](adr/0025-escalate-sanctions-on-the-device-id-and-leave-address-bans-to-operators.md) にある。
+
+        ボディで、利用者が任意で答えた性別と年代を受け取る。ボディを付けると、セッションの
+        答えを置き換える（無い項目・null・空文字は未回答）。ボディを付けないと、有効な
+        セッションの答えはそのまま残る。答えは会話の参加者の記録に残すだけで、マッチングにも
+        相手への表示にも使わない。理由は
+        [ADR-0044](adr/0044-record-the-gender-and-age-band-a-user-chose-to-give-without-matching-on-them.md) にある。
       security:
         - {}
         - sessionCookie: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SessionAttributes"
       responses:
         "201":
           description: 新しいセッションを発行した
@@ -111,6 +123,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Session"
+        "400":
+          description: 性別か年代に受け付けない値が入っている。セッションは発行も更新もしない
         "500":
           $ref: "#/components/responses/InternalServerError"
 
@@ -1025,6 +1039,23 @@ components:
           description: これ以降アクセスが無ければセッションが失効する時刻
           examples:
             - "2026-08-22T12:24:55.302874Z"
+
+    SessionAttributes:
+      type: object
+      additionalProperties: false
+      description: 利用者が任意で答えた性別と年代。マッチングにも相手への表示にも使わない
+      properties:
+        gender:
+          type: [string, "null"]
+          enum: [female, male, other, "", null]
+          description: 性別。null か空文字は未回答
+        age_band:
+          type: [string, "null"]
+          enum: [under_18, "18_19", 20s, 30s, 40s, 50s, 60_plus, "", null]
+          description: 年代。null か空文字は未回答
+      examples:
+        - gender: female
+          age_band: 20s
 
     Topic:
       type: object

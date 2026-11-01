@@ -17,6 +17,8 @@ type Record struct {
 	// It is empty for a session issued before the client held one.
 	Device   string
 	IssuedAt time.Time
+	// Attributes is what the user chose to tell about themselves.
+	Attributes Attributes
 }
 
 // Store keeps sessions until their TTL expires or they are deleted.
@@ -32,6 +34,9 @@ type Store interface {
 	// the index of ipHash alive for at least as long, and returns ErrNotStored
 	// if the token is already gone.
 	Refresh(ctx context.Context, token, ipHash string, ttl time.Duration) error
+	// SetAttributes replaces the attributes of an existing token, and returns
+	// ErrNotStored if the token is already gone.
+	SetAttributes(ctx context.Context, token string, attrs Attributes) error
 	// Delete removes token. Deleting an absent token is not an error.
 	Delete(ctx context.Context, token string) error
 	// DeleteByIPHash removes every session issued to ipHash and returns how
