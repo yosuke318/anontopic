@@ -8,17 +8,22 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
+	"github.com/yosuke318/anontopic/internal/geoip"
 )
 
 const (
 	sessionKeyPrefix = "session:"
 	ipIndexKeyPrefix = "session_ip:"
 
-	fieldIPHash   = "ip_hash"
-	fieldDevice   = "device"
-	fieldIssuedAt = "issued_at"
-	fieldGender   = "gender"
-	fieldAgeBand  = "age_band"
+	fieldIPHash     = "ip_hash"
+	fieldDevice     = "device"
+	fieldIssuedAt   = "issued_at"
+	fieldGender     = "gender"
+	fieldAgeBand    = "age_band"
+	fieldCountry    = "country"
+	fieldPrefecture = "prefecture"
+	fieldASN        = "asn"
 )
 
 // setAttributesScript writes the attributes of a session that still exists.
@@ -52,6 +57,9 @@ func (s *RedisStore) Create(ctx context.Context, token string, rec Record, ttl t
 		fieldIssuedAt, strconv.FormatInt(rec.IssuedAt.UnixNano(), 10),
 		fieldGender, rec.Attributes.Gender,
 		fieldAgeBand, rec.Attributes.AgeBand,
+		fieldCountry, rec.Location.Country,
+		fieldPrefecture, rec.Location.Prefecture,
+		fieldASN, strconv.FormatUint(uint64(rec.Location.ASN), 10),
 	)
 	pipe.Expire(ctx, sessionKey, ttl)
 	touchIndex(ctx, pipe, rec.IPHash, token, ttl)
@@ -89,6 +97,9 @@ func (s *RedisStore) Get(ctx context.Context, token string) (Record, error) {
 		return Record{}, fmt.Errorf("parse %s of session: %w", fieldIssuedAt, err)
 	}
 
+	// A session written before it held an ASN reads as zero.
+	asn, _ := strconv.ParseUint(fields[fieldASN], 10, 32)
+
 	return Record{
 		IPHash:   fields[fieldIPHash],
 		Device:   fields[fieldDevice],
@@ -96,6 +107,11 @@ func (s *RedisStore) Get(ctx context.Context, token string) (Record, error) {
 		Attributes: Attributes{
 			Gender:  fields[fieldGender],
 			AgeBand: fields[fieldAgeBand],
+		},
+		Location: geoip.Location{
+			Country:    fields[fieldCountry],
+			Prefecture: fields[fieldPrefecture],
+			ASN:        uint32(asn),
 		},
 	}, nil
 }

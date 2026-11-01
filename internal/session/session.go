@@ -27,8 +27,11 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"time"
+
+	"github.com/yosuke318/anontopic/internal/geoip"
 )
 
 const (
@@ -66,11 +69,21 @@ type Session struct {
 	ExpiresAt time.Time
 	// Attributes is what the user chose to tell about themselves.
 	Attributes Attributes
+	// Location is where the address the session was issued to is
+	// registered.
+	Location geoip.Location
+}
+
+// Locator tells where an address is registered. It answers an empty
+// Location for an address it does not know.
+type Locator interface {
+	Locate(addr netip.Addr) geoip.Location
 }
 
 // Service issues, verifies and revokes sessions.
 type Service struct {
 	store             Store
+	locator           Locator
 	ipHashKey         []byte
 	idleTTL           time.Duration
 	absoluteTTL       time.Duration
@@ -98,6 +111,9 @@ type Options struct {
 	// from another site requires http.SameSiteNoneMode, which browsers accept
 	// only together with CookieSecure.
 	CookieSameSite http.SameSite
+	// Locator locates the address a session is issued to. Without one, no
+	// session holds a location.
+	Locator Locator
 }
 
 // NewService builds a Service. ipHashKey is the secret the client address is
@@ -115,6 +131,7 @@ func NewService(store Store, ipHashKey []byte, opts Options) *Service {
 
 	return &Service{
 		store:             store,
+		locator:           opts.Locator,
 		ipHashKey:         ipHashKey,
 		idleTTL:           opts.IdleTTL,
 		absoluteTTL:       opts.AbsoluteTTL,
@@ -146,7 +163,13 @@ func (s *Service) Issue(ctx context.Context, r *http.Request, attrs Attributes) 
 	}
 
 	issuedAt := s.now().UTC()
-	rec := Record{IPHash: s.IPHash(r), Device: device, IssuedAt: issuedAt, Attributes: attrs}
+	rec := Record{
+		IPHash:     s.IPHash(r),
+		Device:     device,
+		IssuedAt:   issuedAt,
+		Attributes: attrs,
+		Location:   s.locate(r),
+	}
 	ttl := min(s.idleTTL, s.absoluteTTL)
 
 	if err := s.store.Create(ctx, token, rec, ttl); err != nil {
@@ -160,6 +183,7 @@ func (s *Service) Issue(ctx context.Context, r *http.Request, attrs Attributes) 
 		IssuedAt:   issuedAt,
 		ExpiresAt:  issuedAt.Add(ttl),
 		Attributes: attrs,
+		Location:   rec.Location,
 	}, nil
 }
 
@@ -202,6 +226,7 @@ func (s *Service) Verify(ctx context.Context, token string) (Session, error) {
 		IssuedAt:   rec.IssuedAt,
 		ExpiresAt:  now.Add(ttl),
 		Attributes: rec.Attributes,
+		Location:   rec.Location,
 	}, nil
 }
 
@@ -227,6 +252,7 @@ func (s *Service) Lookup(ctx context.Context, token string) (Session, error) {
 		Device:     rec.Device,
 		IssuedAt:   rec.IssuedAt,
 		Attributes: rec.Attributes,
+		Location:   rec.Location,
 	}, nil
 }
 
@@ -284,6 +310,19 @@ func (s *Service) DeviceID(r *http.Request) string {
 		return ""
 	}
 	return c.Value
+}
+
+// locate looks up where the address r came from is registered. The address
+// itself is not kept.
+func (s *Service) locate(r *http.Request) geoip.Location {
+	if s.locator == nil {
+		return geoip.Location{}
+	}
+	addr, err := netip.ParseAddr(s.clientIP(r))
+	if err != nil {
+		return geoip.Location{}
+	}
+	return s.locator.Locate(addr)
 }
 
 // clientIP is the address the session belongs to.

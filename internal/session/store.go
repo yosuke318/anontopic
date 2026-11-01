@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/yosuke318/anontopic/internal/geoip"
 )
 
 // ErrNotStored is what a Store returns when a token has no record, either
@@ -19,6 +21,8 @@ type Record struct {
 	IssuedAt time.Time
 	// Attributes is what the user chose to tell about themselves.
 	Attributes Attributes
+	// Location is where the address the session was issued to is registered.
+	Location geoip.Location
 }
 
 // Store keeps sessions until their TTL expires or they are deleted.

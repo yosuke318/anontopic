@@ -169,11 +169,11 @@ CREATE TABLE conversation_participants (
     conversation_id UUID NOT NULL REFERENCES conversations(id),
     session_token   VARCHAR(64) NOT NULL,
     ip_hash         VARCHAR(64) NOT NULL,   -- ソルト付きハッシュ化IP(生IPは保存しない)
-    ip_subnet       VARCHAR(20),            -- 多重接続検知用(/24等)
-    country_code    VARCHAR(2),
-    prefecture      VARCHAR(20),
-    asn             INT,
-    is_suspected_vpn BOOLEAN NOT NULL DEFAULT false,
+    ip_subnet       VARCHAR(20),            -- 多重接続検知用(/24等)。未実装
+    country_code    VARCHAR(2),             -- 接続元の国(ISO 3166-1 alpha-2)
+    prefecture      VARCHAR(6),             -- 接続元の都道府県(ISO 3166-2、例: JP-13)。日本だけ
+    asn             BIGINT,                 -- 接続元のAS番号
+    is_suspected_vpn BOOLEAN NOT NULL DEFAULT false, -- 未実装
     gender          VARCHAR(10),            -- 自己申告(任意)。female / male / other。マッチングにも表示にも使わない
     age_band        VARCHAR(10),            -- 自己申告(任意)。under_18 / 18_19 / 20s ... 60_plus
     joined_at       TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -211,11 +211,12 @@ CREATE TABLE banned_identifiers (
 
 -- GeoIP集計(ダッシュボード表示用の日次サマリ)
 CREATE TABLE geo_daily_stats (
-    stat_date        DATE NOT NULL,
-    country_code     VARCHAR(2),
-    prefecture       VARCHAR(20),
-    connection_count INT NOT NULL DEFAULT 0,
-    report_count     INT NOT NULL DEFAULT 0,
+    stat_date        DATE NOT NULL,                  -- 日本時間
+    country_code     VARCHAR(2) NOT NULL DEFAULT '', -- 空文字は不明
+    prefecture       VARCHAR(6) NOT NULL DEFAULT '', -- 空文字は不明か日本以外
+    connection_count INT NOT NULL DEFAULT 0,         -- その日に会話に参加した人数
+    report_count     INT NOT NULL DEFAULT 0,         -- その日の通報で、通報した人を除く会話の参加者の数
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (stat_date, country_code, prefecture)
 );
 
@@ -294,17 +295,20 @@ CREATE TABLE topic_daily_stats (
 
 初期リリースでは無料のASNベース判定から開始し、誤検知・見逃しの実測値を見ながら有料版への切替を検討する。
 
+GeoLiteのデータベースは、サーバーが起動時と1週間ごとにMaxMindから直接ダウンロードしてメモリに読み込む。使用許諾が求める「新しい版が出て30日以内の差し替え」を、デプロイなしで守るため（ADR-0045）。
+
 #### 9.3 実装方式
 
-- **多重接続検知**: 接続確立時に`ip_subnet`（例: /24）をキーにしたカウンタをRedisでインクリメントし、一定時間内（例: 5分）に閾値（例: 10接続）を超えたら`moderation`モジュールがレート制限を発動する。
-- **地域集中検知**: `reports`登録時に`conversation_participants.prefecture`を突き合わせ、`geo_daily_stats`を日次バッチで更新する。通報率が閾値を超えた都道府県・ASNを検知したら管理者に通知する。
-- **VPN/プロキシ疑い検知**: 接続確立時にASNを引き、既知のホスティング/VPN事業者リストと照合して`is_suspected_vpn`を立てる。即時ブロックはせず、レート制限強化・NGワード判定閾値の引き下げなど段階的な扱いにする（正規の海外在住ユーザーの誤遮断を避けるため）。
+- **多重接続検知**（未実装）: 接続確立時に`ip_subnet`（例: /24）をキーにしたカウンタをRedisでインクリメントし、一定時間内（例: 5分）に閾値（例: 10接続）を超えたら`moderation`モジュールがレート制限を発動する。
+- **地域の判定**: セッションの発行時に接続元の国・都道府県・ASNを引いてセッションに持たせ、ルームが成立したときに`conversation_participants`に書く（ADR-0045）。
+- **地域集中検知**: 日次バッチが、その日に参加した人数と、その日の通報で通報した人を除く会話の参加者の数を国・都道府県ごとに数え、`geo_daily_stats`に書く。通報率が閾値を超えた都道府県・ASNを検知して管理者に通知する仕組みは未実装。
+- **VPN/プロキシ疑い検知**（未実装）: 接続確立時にASNを引き、既知のホスティング/VPN事業者リストと照合して`is_suspected_vpn`を立てる。即時ブロックはせず、レート制限強化・NGワード判定閾値の引き下げなど段階的な扱いにする（正規の海外在住ユーザーの誤遮断を避けるため）。
 
 #### 9.4 プライバシー配慮
 
 - 生IPアドレスは保存せず、ソルト付きハッシュ化した`ip_hash`と、多重接続検知に必要な範囲の`ip_subnet`のみを保持する。
 - 法的照会に備えても生IPは保持しない。照会でIPアドレスを示された場合は、同じ鍵でハッシュ化して`ip_hash`と照合する（ADR-0037）。
-- 保持期間は会話ログ(90日)とは別枠で管理し、参加から180日で`retention`モジュールが`ip_hash`と`device_fingerprint`、自己申告の`gender`と`age_band`を消す。通報された会話の参加者の分は残す（ADR-0037）。
+- 保持期間は会話ログ(90日)とは別枠で管理し、参加から180日で`retention`モジュールが`ip_hash`と`device_fingerprint`、自己申告の`gender`と`age_band`、接続元の`country_code`・`prefecture`・`asn`を消す。通報された会話の参加者の分は残す（ADR-0037）。
 
 ### 10. 今後の検討事項（未確定）
 

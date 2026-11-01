@@ -25,6 +25,7 @@ import (
 
 	"github.com/yosuke318/anontopic/internal/capacity"
 	"github.com/yosuke318/anontopic/internal/chat"
+	"github.com/yosuke318/anontopic/internal/geoip"
 	"github.com/yosuke318/anontopic/internal/matching"
 	"github.com/yosuke318/anontopic/internal/moderation"
 	"github.com/yosuke318/anontopic/internal/report"
@@ -79,7 +80,7 @@ func run() error {
 	rdb := redis.NewClient(redisOpts)
 	defer func() { _ = rdb.Close() }()
 
-	sessions, err := newSessionService(rdb)
+	sessions, err := newSessionService(rdb, startGeoIP(ctx))
 	if err != nil {
 		return err
 	}
@@ -100,7 +101,7 @@ func run() error {
 		matching.NewPostgresRepository(pool),
 		topics,
 		matchingBans{bans},
-		sessionIdentities{sessions},
+		sessionParticipants{sessions},
 		limits,
 		matching.Options{
 			WaitTTL:       envDuration("MATCHING_WAIT_TTL", matching.DefaultWaitTTL),
@@ -234,20 +235,22 @@ func (b matchingBans) IsBanned(ctx context.Context, id matching.Identity) (bool,
 	return b.bans.IsBanned(ctx, report.Identity(id))
 }
 
-// sessionIdentities reads the identifiers and the attributes of a waiting
-// user out of the session module, for the matching module to record with the
-// room.
-type sessionIdentities struct {
+// sessionParticipants reads what the session of a waiting user holds out of
+// the session module, for the matching module to record with the room.
+type sessionParticipants struct {
 	sessions *session.Service
 }
 
-func (s sessionIdentities) Identity(ctx context.Context, token string) (matching.Identity, matching.Attributes, error) {
+func (s sessionParticipants) Participant(ctx context.Context, token string) (matching.Participant, error) {
 	sess, err := s.sessions.Lookup(ctx, token)
 	if err != nil {
-		return matching.Identity{}, matching.Attributes{}, err
+		return matching.Participant{}, err
 	}
-	return matching.Identity{IPHash: sess.IPHash, Device: sess.Device},
-		matching.Attributes(sess.Attributes), nil
+	return matching.Participant{
+		Identity:   matching.Identity{IPHash: sess.IPHash, Device: sess.Device},
+		Attributes: matching.Attributes(sess.Attributes),
+		Location:   matching.Location(sess.Location),
+	}, nil
 }
 
 // chatSanctions carries what the chat module asks of the ban list to the
@@ -431,8 +434,23 @@ func newCapacityService(rdb *redis.Client) *capacity.Service {
 	return capacity.NewService(capacity.NewRedisStore(rdb), opts)
 }
 
+// startGeoIP downloads the GeoLite databases in the background and keeps
+// them up to date until ctx ends. Without the credentials of a MaxMind
+// account, it returns nil and no session holds a location.
+func startGeoIP(ctx context.Context) session.Locator {
+	accountID, licenseKey := os.Getenv("MAXMIND_ACCOUNT_ID"), os.Getenv("MAXMIND_LICENSE_KEY")
+	if accountID == "" || licenseKey == "" {
+		slog.Info("MAXMIND_ACCOUNT_ID or MAXMIND_LICENSE_KEY is not set, sessions are not located")
+		return nil
+	}
+
+	db := &geoip.Database{}
+	go geoip.NewUpdater(db, accountID, licenseKey).Run(ctx, envDuration("GEOIP_UPDATE_INTERVAL", geoip.DefaultInterval))
+	return db
+}
+
 // newSessionService builds the session module from the environment.
-func newSessionService(rdb *redis.Client) (*session.Service, error) {
+func newSessionService(rdb *redis.Client, locator session.Locator) (*session.Service, error) {
 	sameSite, err := parseSameSite(envOr("SESSION_COOKIE_SAMESITE", "lax"))
 	if err != nil {
 		return nil, err
@@ -452,6 +470,7 @@ func newSessionService(rdb *redis.Client) (*session.Service, error) {
 		TrustForwardedFor: envBool("APP_TRUST_FORWARDED_FOR", false),
 		CookieSecure:      secure,
 		CookieSameSite:    sameSite,
+		Locator:           locator,
 	}), nil
 }
 

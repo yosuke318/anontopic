@@ -26,10 +26,10 @@ const (
 	demandWaitMS  = "wait_ms"
 )
 
-// demandZone is the time zone the days of the demand are cut in. Japan keeps
-// no daylight saving time, so a fixed offset needs no time zone database in
-// the container.
-var demandZone = time.FixedZone("JST", 9*60*60)
+// statZone is the time zone the days of the daily statistics are cut in.
+// Japan keeps no daylight saving time, so a fixed offset needs no time zone
+// database in the container.
+var statZone = time.FixedZone("JST", 9*60*60)
 
 // DefaultDemandDays is how many past days a run of SummarizeDemand copies.
 // It has to stay below the days demandTTL keeps a day in Redis.
@@ -60,8 +60,8 @@ type DemandRecords interface {
 	SaveDemand(ctx context.Context, date string, demand map[Queue]Demand) error
 }
 
-// DemandSummary is what one run of SummarizeDemand did.
-type DemandSummary struct {
+// DailySummary is what one run of SummarizeDemand or SummarizeGeo did.
+type DailySummary struct {
 	DryRun bool
 	// Days lists the dates that had any demand to copy.
 	Days []string
@@ -74,13 +74,13 @@ type DemandSummary struct {
 // whole, so a run can be repeated, and a day Redis no longer holds is left as
 // it was. A dry run reads the counts and writes nothing. A day that fails is
 // reported in the error and the other days are still copied.
-func SummarizeDemand(ctx context.Context, counts DemandCounts, records DemandRecords, now time.Time, days int, dryRun bool) (DemandSummary, error) {
-	summary := DemandSummary{DryRun: dryRun}
-	today := now.In(demandZone)
+func SummarizeDemand(ctx context.Context, counts DemandCounts, records DemandRecords, now time.Time, days int, dryRun bool) (DailySummary, error) {
+	summary := DailySummary{DryRun: dryRun}
+	today := now.In(statZone)
 
 	var errs []error
 	for i := days; i >= 1; i-- {
-		date := demandDate(today.AddDate(0, 0, -i))
+		date := statDate(today.AddDate(0, 0, -i))
 
 		demand, err := counts.Demand(ctx, date)
 		if err != nil {
@@ -104,8 +104,8 @@ func SummarizeDemand(ctx context.Context, counts DemandCounts, records DemandRec
 	return summary, errors.Join(errs...)
 }
 
-// demandDate is the day t falls on, as the demand is kept under.
-func demandDate(t time.Time) string { return t.In(demandZone).Format(time.DateOnly) }
+// statDate is the day t falls on, as the daily statistics are kept under.
+func statDate(t time.Time) string { return t.In(statZone).Format(time.DateOnly) }
 
 // demandFieldPrefix starts the name of every counter q keeps in the hash of
 // a day.

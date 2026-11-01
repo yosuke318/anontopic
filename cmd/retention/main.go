@@ -2,12 +2,15 @@
 // exits. It is meant to be started by a scheduler late at night. The same run
 // copies the topic demand of the past days from Redis into
 // topic_daily_stats, as described in
-// docs/adr/0043-count-the-topic-demand-in-redis-and-keep-only-daily-totals.md.
+// docs/adr/0043-count-the-topic-demand-in-redis-and-keep-only-daily-totals.md,
+// and counts the participants of the past days by region into
+// geo_daily_stats, as described in
+// docs/adr/0045-locate-the-prefecture-of-a-session-with-geolite-downloaded-by-the-server.md.
 //
 // Usage:
 //
-//	retention            パーティションを作成・削除し、期限を過ぎた参加者の識別子を消し、トピック別の需要を書き写す
-//	retention -dry-run   作成・削除・消去・書き写しの予定だけをログに出し、何も変えない
+//	retention            パーティションを作成・削除し、期限を過ぎた参加者の識別子を消し、トピック別の需要と地域別の集計を書く
+//	retention -dry-run   作成・削除・消去・書き込みの予定だけをログに出し、何も変えない
 //
 // The command exits with status 1 when any step failed, and logs every failure
 // with the message "retention failed", which is what an alert should watch.
@@ -81,10 +84,12 @@ func run(dryRun bool) error {
 
 	matchingRepo := matching.NewPostgresRepository(pool)
 
+	reportRepo := report.NewPostgresRepository(pool)
+
 	svc := retention.NewService(
 		messagePartitions{chat.NewPartitions(pool)},
 		matchingRepo,
-		report.NewService(report.NewPostgresRepository(pool), nil, nil),
+		report.NewService(reportRepo, nil, nil),
 		retention.Options{
 			MessageDays:    envInt("RETENTION_MESSAGE_DAYS", retention.DefaultMessageDays),
 			IdentifierDays: envInt("RETENTION_IDENTIFIER_DAYS", retention.DefaultIdentifierDays),
@@ -116,7 +121,33 @@ func run(dryRun bool) error {
 		slog.Any("days", demand.Days),
 		slog.Int("rows", demand.Rows))
 
-	return errors.Join(err, demandErr)
+	geo, geoErr := matching.SummarizeGeo(ctx,
+		matchingRepo, matchingReports{reportRepo}, time.Now(), matching.DefaultGeoDays, dryRun)
+	slog.Info("regions summarized",
+		slog.Bool("dry_run", geo.DryRun),
+		slog.Any("days", geo.Days),
+		slog.Int("rows", geo.Rows))
+
+	return errors.Join(err, demandErr, geoErr)
+}
+
+// matchingReports carries the reports of a period from the report module to
+// the matching module, which counts the reported participants by region.
+type matchingReports struct {
+	reports *report.PostgresRepository
+}
+
+func (m matchingReports) ReportsBetween(ctx context.Context, from, to time.Time) ([]matching.Report, error) {
+	list, err := m.reports.CreatedBetween(ctx, from, to)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]matching.Report, 0, len(list))
+	for _, r := range list {
+		out = append(out, matching.Report{ConversationID: r.ConversationID, ReporterToken: r.ReporterToken})
+	}
+	return out, nil
 }
 
 // messagePartitions carries what the retention module asks about the

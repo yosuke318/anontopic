@@ -74,18 +74,21 @@ func duplicate(participants []Participant) (string, bool) {
 }
 
 // insertParticipants records every participant of one conversation. An
-// identifier that is not known, and an attribute the user did not answer, is
-// written as NULL.
+// identifier or a location that is not known, and an attribute the user did
+// not answer, is written as NULL.
 func insertParticipants(ctx context.Context, tx pgx.Tx, conversationID string, participants []Participant) error {
 	batch := &pgx.Batch{}
 	for _, p := range participants {
 		batch.Queue(
 			"INSERT INTO conversation_participants "+
-				"(conversation_id, session_token, ip_hash, device_fingerprint, gender, age_band) "+
-				"VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), NULLIF($6, '')) "+
+				"(conversation_id, session_token, ip_hash, device_fingerprint, gender, age_band, "+
+				"country_code, prefecture, asn) "+
+				"VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), NULLIF($6, ''), "+
+				"NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, 0)) "+
 				"ON CONFLICT DO NOTHING",
 			conversationID, p.Token, p.Identity.IPHash, p.Identity.Device,
-			p.Attributes.Gender, p.Attributes.AgeBand)
+			p.Attributes.Gender, p.Attributes.AgeBand,
+			p.Location.Country, p.Location.Prefecture, int64(p.Location.ASN))
 	}
 
 	if err := tx.SendBatch(ctx, batch).Close(); err != nil {

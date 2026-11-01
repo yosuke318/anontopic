@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -132,6 +133,23 @@ func (r *PostgresRepository) Reported(ctx context.Context, conversationIDs []str
 		return nil, fmt.Errorf("read reported conversations: %w", err)
 	}
 	return ids, nil
+}
+
+// CreatedBetween returns the reports created from from up to, but not
+// including, to.
+func (r *PostgresRepository) CreatedBetween(ctx context.Context, from, to time.Time) ([]Report, error) {
+	rows, err := r.pool.Query(ctx,
+		"SELECT "+reportColumns+" FROM reports WHERE created_at >= $1 AND created_at < $2 ORDER BY id",
+		from, to)
+	if err != nil {
+		return nil, fmt.Errorf("select reports between: %w", err)
+	}
+
+	reports, err := pgx.CollectRows(rows, scanReport)
+	if err != nil {
+		return nil, fmt.Errorf("read reports between: %w", err)
+	}
+	return reports, nil
 }
 
 // filterClause builds the WHERE clause of f and the arguments it refers to.

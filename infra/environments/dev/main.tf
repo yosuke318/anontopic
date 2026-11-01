@@ -36,6 +36,8 @@ module "compute" {
     "REDIS_URL",
     "SESSION_IP_HASH_SECRET",
     "ADMIN_API_TOKEN",
+    "MAXMIND_ACCOUNT_ID",
+    "MAXMIND_LICENSE_KEY",
   ]
 
   zone_name       = local.domain_name
