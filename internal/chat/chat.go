@@ -429,7 +429,7 @@ func (s *Service) Serve(ctx context.Context, ws *websocket.Conn, adm Admission) 
 	if err := s.hub.attach(ctx, adm.Conversation.ID, c); err != nil {
 		slog.Error("subscribe to room",
 			slog.String("conversation_id", adm.Conversation.ID), slog.Any("error", err))
-		c.send(serverEvent{Type: eventError, Code: codeUnavailable, Message: "the room is unavailable"})
+		c.refuse(serverEvent{Type: eventError, Code: codeUnavailable, Message: "the room is unavailable"})
 		return
 	}
 	defer s.depart(ctx, c)
@@ -438,7 +438,7 @@ func (s *Service) Serve(ctx context.Context, ws *websocket.Conn, adm Admission) 
 	if err != nil {
 		slog.Error("record arrival",
 			slog.String("conversation_id", adm.Conversation.ID), slog.Any("error", err))
-		c.send(serverEvent{Type: eventError, Code: codeUnavailable, Message: "the room is unavailable"})
+		c.refuse(serverEvent{Type: eventError, Code: codeUnavailable, Message: "the room is unavailable"})
 		return
 	}
 

@@ -54,8 +54,8 @@ go run ./test/load/chat -h                       # すべてのフラグ
 
 ### 1 台のクライアントから流すときの上限
 
-サーバーは IP アドレスごとに、接続数（`CAPACITY_MAX_CONNECTIONS_PER_IP`、既定 5）と
-マッチングの要求数（`CAPACITY_MATCH_BURST`、既定 3 回）を絞る。1 台から流すと、
+サーバーは IP アドレスごとに、接続数（`CAPACITY_MAX_CONNECTIONS_PER_IP`、既定 20）と
+マッチングの要求数（`CAPACITY_MATCH_BURST`、既定 10 回）を絞る。1 台から流すと、
 ここで止まって全体の上限まで届かない。
 
 - ローカル: `CAPACITY_MAX_CONNECTIONS_PER_IP=10000 CAPACITY_MATCH_BURST=10000 make up`

@@ -31,6 +31,9 @@ type conn struct {
 	out       chan outgoing
 	done      chan struct{}
 	closeOnce sync.Once
+	// written is closed once writeLoop has stopped, which is after it wrote
+	// the last event it was given.
+	written chan struct{}
 }
 
 // outgoing is one event on its way to a client.
@@ -52,6 +55,7 @@ func newConn(svc *Service, ws *websocket.Conn, adm Admission) *conn {
 		identity:       adm.Identity,
 		out:            make(chan outgoing, sendBuffer),
 		done:           make(chan struct{}),
+		written:        make(chan struct{}),
 	}
 }
 
@@ -78,6 +82,21 @@ func (c *conn) send(ev serverEvent) {
 	}
 
 	c.enqueue(outgoing{payload: payload, last: ev.Type == eventEnded})
+}
+
+// refuse tells the client why its room cannot be served, and returns once
+// that event is written and the connection is closed. Closing the connection
+// before writeLoop wrote the event would drop it.
+func (c *conn) refuse(ev serverEvent) {
+	payload, err := json.Marshal(ev)
+	if err != nil {
+		slog.Error("encode event", slog.String("event", ev.Type), slog.Any("error", err))
+		c.close()
+		return
+	}
+
+	c.enqueue(outgoing{payload: payload, last: true})
+	<-c.written
 }
 
 // enqueue hands one event to writeLoop. A connection that is too far behind
@@ -121,6 +140,8 @@ func (c *conn) readLoop(ctx context.Context) {
 // writeLoop writes what the room has for this connection, and pings a client
 // that has been quiet to find out whether it is still there.
 func (c *conn) writeLoop() {
+	defer close(c.written)
+
 	ping := time.NewTicker(c.svc.pingInterval)
 	defer ping.Stop()
 

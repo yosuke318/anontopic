@@ -307,13 +307,13 @@ APIサーバーの設定は環境変数で行う。
 | `CHAT_REJOIN_GRACE` | `30s` | 切断した参加者を待つ時間。接続中が1人以下のままこの時間を超えると会話を終了する |
 | `MODERATION_RELOAD_INTERVAL` | `5m` | NGワード辞書を読み直す間隔。辞書の変更が反映されるまでの最大の遅れになる |
 | `CAPACITY_MAX_CONNECTIONS` | `1000` | 全サーバー合計で同時に持つWebSocket接続の上限。達している間は新規接続を503で拒否する |
-| `CAPACITY_MAX_CONNECTIONS_PER_IP` | `5` | 1つのIPハッシュが同時に持てる接続数。超えた接続は429で拒否する |
+| `CAPACITY_MAX_CONNECTIONS_PER_IP` | `20` | 1つのIPハッシュが同時に持てる接続数。超えた接続は429で拒否する。携帯回線は大勢で1つのIPv4アドレスを共有するため、家庭の回線より大きく取っている |
 | `CAPACITY_LEASE_TTL` | `30s` | 接続がリースを持ち続ける時間。更新が止まったリースはこの時間で切れ、数から外れる |
 | `CAPACITY_RENEW_INTERVAL` | `10s` | 開いている接続がリースを更新する間隔。`CAPACITY_LEASE_TTL` の1/3に収まらない値は起動時に切り詰める |
 | `CAPACITY_MESSAGE_BURST` | `5` | 続けて送れるメッセージ数 |
 | `CAPACITY_MESSAGE_INTERVAL` | `1s` | 送信枠が1通ずつ回復する間隔 |
-| `CAPACITY_MATCH_BURST` | `3` | 続けて出せるマッチング要求の数。IPハッシュ単位で数える |
-| `CAPACITY_MATCH_INTERVAL` | `10s` | マッチング要求の枠が1回ずつ回復する間隔 |
+| `CAPACITY_MATCH_BURST` | `10` | 続けて出せるマッチング要求の数。IPハッシュ単位で数える |
+| `CAPACITY_MATCH_INTERVAL` | `2s` | マッチング要求の枠が1回ずつ回復する間隔 |
 | `CAPACITY_CLAIM_BURST` | `3` | 続けて送れる権利侵害の申し立ての数。IPハッシュ単位で数える |
 | `CAPACITY_CLAIM_INTERVAL` | `10m` | 申し立ての枠が1回ずつ回復する間隔 |
 
