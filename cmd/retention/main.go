@@ -1,10 +1,13 @@
 // Command retention applies the retention policy to the database once and
-// exits. It is meant to be started by a scheduler late at night.
+// exits. It is meant to be started by a scheduler late at night. The same run
+// copies the topic demand of the past days from Redis into
+// topic_daily_stats, as described in
+// docs/adr/0043-count-the-topic-demand-in-redis-and-keep-only-daily-totals.md.
 //
 // Usage:
 //
-//	retention            パーティションを作成・削除し、期限を過ぎた参加者の識別子を消す
-//	retention -dry-run   作成・削除・消去の予定だけをログに出し、何も変えない
+//	retention            パーティションを作成・削除し、期限を過ぎた参加者の識別子を消し、トピック別の需要を書き写す
+//	retention -dry-run   作成・削除・消去・書き写しの予定だけをログに出し、何も変えない
 //
 // The command exits with status 1 when any step failed, and logs every failure
 // with the message "retention failed", which is what an alert should watch.
@@ -15,6 +18,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"log/slog"
 	"os"
@@ -24,6 +28,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/yosuke318/anontopic/internal/chat"
 	"github.com/yosuke318/anontopic/internal/matching"
@@ -31,7 +36,10 @@ import (
 	"github.com/yosuke318/anontopic/internal/retention"
 )
 
-const defaultDatabaseURL = "postgres://anontopic:anontopic@localhost:5432/anontopic?sslmode=disable"
+const (
+	defaultDatabaseURL = "postgres://anontopic:anontopic@localhost:5432/anontopic?sslmode=disable"
+	defaultRedisURL    = "redis://localhost:6379/0"
+)
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
@@ -60,9 +68,22 @@ func run(dryRun bool) error {
 	}
 	defer pool.Close()
 
+	redisURL := os.Getenv("REDIS_URL")
+	if redisURL == "" {
+		redisURL = defaultRedisURL
+	}
+	redisOpts, err := redis.ParseURL(redisURL)
+	if err != nil {
+		return err
+	}
+	rdb := redis.NewClient(redisOpts)
+	defer func() { _ = rdb.Close() }()
+
+	matchingRepo := matching.NewPostgresRepository(pool)
+
 	svc := retention.NewService(
 		messagePartitions{chat.NewPartitions(pool)},
-		matching.NewPostgresRepository(pool),
+		matchingRepo,
 		report.NewService(report.NewPostgresRepository(pool), nil, nil),
 		retention.Options{
 			MessageDays:    envInt("RETENTION_MESSAGE_DAYS", retention.DefaultMessageDays),
@@ -88,7 +109,14 @@ func run(dryRun bool) error {
 		slog.Int("erased_conversations", res.ErasedConversations),
 		slog.Int64("erased_participants", res.ErasedParticipants))
 
-	return err
+	demand, demandErr := matching.SummarizeDemand(ctx,
+		matching.NewRedisStore(rdb), matchingRepo, time.Now(), matching.DefaultDemandDays, dryRun)
+	slog.Info("demand summarized",
+		slog.Bool("dry_run", demand.DryRun),
+		slog.Any("days", demand.Days),
+		slog.Int("rows", demand.Rows))
+
+	return errors.Join(err, demandErr)
 }
 
 // messagePartitions carries what the retention module asks about the

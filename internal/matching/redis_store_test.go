@@ -44,12 +44,23 @@ func redisTestStore(t *testing.T) *RedisStore {
 }
 
 // testQueue is a queue of its own, so that tests running against the same
-// Redis do not read each other's users.
+// Redis do not read each other's users. The counts the test leaves under the
+// queue are removed with it, so that the daily batch run on the local stack
+// does not copy them for a topic that does not exist.
 func testQueue(t *testing.T, store *RedisStore, roomType int) Queue {
 	t.Helper()
 
 	q := Queue{TopicID: rand.IntN(1_000_000) + 1, RoomType: roomType}
-	t.Cleanup(func() { store.client.Del(context.Background(), queueKey(q)) })
+	t.Cleanup(func() {
+		ctx := context.Background()
+		store.client.Del(ctx, queueKey(q))
+
+		days, _ := store.client.Keys(ctx, demandKeyPrefix+"*").Result()
+		prefix := demandFieldPrefix(q)
+		for _, key := range days {
+			store.client.HDel(ctx, key, prefix+demandQueued, prefix+demandMatched, prefix+demandLeft, prefix+demandWaitMS)
+		}
+	})
 
 	return q
 }
@@ -307,7 +318,7 @@ func TestRemoveTakesTheUserOutOfTheQueue(t *testing.T) {
 	enqueue(t, store, first, q, now)
 	enqueue(t, store, second, q, now)
 
-	if err := store.Remove(ctx, first); err != nil {
+	if err := store.Remove(ctx, first, now); err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
 

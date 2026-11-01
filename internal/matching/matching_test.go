@@ -143,7 +143,7 @@ func (s *fakeStore) Lookup(_ context.Context, token string) (State, error) {
 	return State{Kind: StateIdle}, nil
 }
 
-func (s *fakeStore) Remove(_ context.Context, token string) error {
+func (s *fakeStore) Remove(_ context.Context, token string, _ time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
