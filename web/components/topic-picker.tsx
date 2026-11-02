@@ -19,7 +19,12 @@ import type { Topic } from "@/lib/topics";
 const siteNotice =
   "このサービスは雑談・趣味・相談のためのものです。出会いや交際を目的とした利用、連絡先の交換はできません。はじめる前に";
 
-const roomTypeHint = "3 人が揃わないときは、しばらく待ってから 2 人で始まります。";
+// 選択肢として表示するが、まだ選べないトピック名とルーム人数。
+const comingSoonTopicNames = new Set(["音楽", "スポーツ"]);
+const comingSoonRoomTypes = new Set<RoomType>([3]);
+const comingSoonLabel = "近日公開";
+
+const disabledOptionClass = "cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400";
 
 const roomTypeLabels: Record<RoomType, { title: string; body: string }> = {
   2: { title: "2 人で話す", body: "相手はひとり。じっくり話したいとき。" },
@@ -49,7 +54,7 @@ function messageForError(error: unknown): string {
 export function TopicPicker({ topics }: { topics: Topic[] }) {
   const router = useRouter();
   const [topicId, setTopicId] = useState<number | null>(null);
-  const [roomType, setRoomType] = useState<RoomType>(3);
+  const [roomType, setRoomType] = useState<RoomType>(2);
   const [gender, setGender] = useState<Gender | "">("");
   const [ageBand, setAgeBand] = useState<AgeBand | "">("");
   const [submitting, setSubmitting] = useState(false);
@@ -91,54 +96,73 @@ export function TopicPicker({ topics }: { topics: Topic[] }) {
         <legend className="text-xl font-bold tracking-tight">話したいトピック</legend>
         <p className="text-muted mt-2 leading-7">ひとつ選んでください。</p>
         <div className="mt-6 flex flex-wrap gap-3">
-          {topics.map((topic) => (
-            <label
-              key={topic.id}
-              className={`outline-brand-ink cursor-pointer rounded-full border px-5 py-2.5 text-sm font-medium transition-colors focus-within:outline-2 focus-within:outline-offset-2 ${
-                topicId === topic.id
-                  ? "border-brand bg-brand text-brand-contrast"
-                  : "border-line hover:bg-surface"
-              }`}
-            >
-              <input
-                type="radio"
-                name="topic"
-                value={topic.id}
-                checked={topicId === topic.id}
-                onChange={() => setTopicId(topic.id)}
-                className="sr-only"
-              />
-              {topic.name}
-            </label>
-          ))}
+          {topics.map((topic) => {
+            const comingSoon = comingSoonTopicNames.has(topic.name);
+            return (
+              <label
+                key={topic.id}
+                className={`outline-brand-ink rounded-full border px-5 py-2.5 text-sm font-medium transition-colors focus-within:outline-2 focus-within:outline-offset-2 ${
+                  comingSoon
+                    ? disabledOptionClass
+                    : topicId === topic.id
+                      ? "border-brand bg-brand text-brand-contrast cursor-pointer"
+                      : "border-line hover:bg-surface cursor-pointer"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="topic"
+                  value={topic.id}
+                  checked={topicId === topic.id}
+                  disabled={comingSoon}
+                  onChange={() => setTopicId(topic.id)}
+                  className="sr-only"
+                />
+                {topic.name}
+                {comingSoon && <span className="ml-2 text-xs">{comingSoonLabel}</span>}
+              </label>
+            );
+          })}
         </div>
       </fieldset>
 
       <fieldset className="mt-12">
         <legend className="text-xl font-bold tracking-tight">話す人数</legend>
-        <p className="text-muted mt-2 leading-7">{roomTypeHint}</p>
         <div className="mt-6 grid gap-3 sm:grid-cols-2">
-          {roomTypes.map((value) => (
-            <label
-              key={value}
-              className={`outline-brand-ink cursor-pointer rounded-2xl border p-5 transition-colors focus-within:outline-2 focus-within:outline-offset-2 ${
-                roomType === value ? "border-brand bg-brand-soft" : "border-line hover:bg-surface"
-              }`}
-            >
-              <input
-                type="radio"
-                name="roomType"
-                value={value}
-                checked={roomType === value}
-                onChange={() => setRoomType(value)}
-                className="sr-only"
-              />
-              <span className="block font-bold">{roomTypeLabels[value].title}</span>
-              <span className="text-muted mt-2 block text-sm leading-6">
-                {roomTypeLabels[value].body}
-              </span>
-            </label>
-          ))}
+          {roomTypes.map((value) => {
+            const comingSoon = comingSoonRoomTypes.has(value);
+            return (
+              <label
+                key={value}
+                className={`outline-brand-ink rounded-2xl border p-5 transition-colors focus-within:outline-2 focus-within:outline-offset-2 ${
+                  comingSoon
+                    ? disabledOptionClass
+                    : roomType === value
+                      ? "border-brand bg-brand-soft cursor-pointer"
+                      : "border-line hover:bg-surface cursor-pointer"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="roomType"
+                  value={value}
+                  checked={roomType === value}
+                  disabled={comingSoon}
+                  onChange={() => setRoomType(value)}
+                  className="sr-only"
+                />
+                <span className="block font-bold">
+                  {roomTypeLabels[value].title}
+                  {comingSoon && (
+                    <span className="ml-2 text-xs font-medium">{comingSoonLabel}</span>
+                  )}
+                </span>
+                <span className={`mt-2 block text-sm leading-6 ${comingSoon ? "" : "text-muted"}`}>
+                  {roomTypeLabels[value].body}
+                </span>
+              </label>
+            );
+          })}
         </div>
       </fieldset>
 
