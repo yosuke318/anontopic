@@ -396,6 +396,7 @@ AdSense の管理画面では次の 2 つを守る。コードからは強制で
 
 PostgreSQL のテーブルの関係。実線は外部キー、点線は外部キーを張らずに ID だけを持つ参照。
 列の型と制約の正は `db/migrations/` で、テーブルを変えたらこの図も合わせて直す。
+複数の列を組にした一意制約は、図の UK では表せないため列の説明に書いた。
 
 ```mermaid
 erDiagram
@@ -426,8 +427,8 @@ erDiagram
 
     conversation_participants {
         bigint id PK
-        uuid conversation_id FK,UK "session_token との組で一意"
-        varchar session_token UK "参加者を会話の中で識別する一時的な値"
+        uuid conversation_id FK "(conversation_id, session_token) で一意"
+        varchar session_token "参加者を会話の中で識別する一時的な値"
         timestamptz joined_at
         varchar ip_hash "180 日で NULL"
         varchar device_fingerprint "180 日で NULL"
@@ -459,8 +460,8 @@ erDiagram
 
     reports {
         bigint id PK
-        uuid conversation_id FK,UK "reporter_token との組で一意"
-        varchar reporter_token UK "通報した参加者の session_token"
+        uuid conversation_id FK "(conversation_id, reporter_token) で一意"
+        varchar reporter_token "通報した参加者の session_token"
         varchar reason
         varchar status "open / reviewing / actioned / rejected"
         timestamptz created_at
