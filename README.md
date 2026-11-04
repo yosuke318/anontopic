@@ -392,6 +392,148 @@ AdSense の管理画面では次の 2 つを守る。コードからは強制で
 | 適用済み管理 | `schema_migrations` テーブル | 追跡しない |
 | 環境差 | 全環境で同じ | 環境ごとに違う |
 
+#### ER 図
+
+PostgreSQL のテーブルの関係。実線は外部キー、点線は外部キーを張らずに ID だけを持つ参照。
+列の型と制約の正は `db/migrations/` で、テーブルを変えたらこの図も合わせて直す。
+複数の列を組にした一意制約は、図の UK では表せないため列の説明に書いた。
+
+```mermaid
+erDiagram
+    topics ||--o{ conversations : "topic_id"
+    conversations ||--|{ conversation_participants : "conversation_id"
+    conversations ||--o{ messages : "conversation_id"
+    conversations ||--o{ retained_messages : "conversation_id"
+    conversations ||--o{ reports : "conversation_id"
+    conversations |o..o{ banned_identifiers : "conversation_id"
+    topics ||..o{ topic_daily_stats : "topic_id"
+
+    topics {
+        serial id PK "トピックID"
+        varchar name "トピック名"
+        boolean is_active "有効フラグ"
+        timestamptz created_at
+    }
+
+    conversations {
+        uuid id PK "会話ID"
+        int topic_id FK
+        smallint room_type "2 / 3"
+        timestamptz started_at
+        timestamptz ended_at "進行中は NULL"
+        varchar end_reason
+        boolean is_flagged "通報された会話は保持期間を過ぎても残す"
+    }
+
+    conversation_participants {
+        bigint id PK
+        uuid conversation_id FK "(conversation_id, session_token) で一意"
+        varchar session_token "参加者を会話の中で識別する一時的な値"
+        timestamptz joined_at
+        varchar ip_hash "180 日で NULL"
+        varchar device_fingerprint "180 日で NULL"
+        varchar gender "自己申告。180 日で NULL"
+        varchar age_band "自己申告。180 日で NULL"
+        varchar country_code "180 日で NULL"
+        varchar prefecture "180 日で NULL"
+        bigint asn "180 日で NULL"
+    }
+
+    messages {
+        bigint id PK
+        timestamptz created_at PK "日次パーティションのキー"
+        uuid conversation_id FK
+        varchar sender_token "参加者の session_token"
+        text body
+        smallint moderation_flag "0 問題なし / 1 NG / 2 通報あり"
+    }
+
+    retained_messages {
+        bigint id PK "messages での値"
+        uuid conversation_id FK
+        varchar sender_token
+        text body
+        smallint moderation_flag
+        timestamptz created_at
+        timestamptz retained_at "messages から移した日時"
+    }
+
+    reports {
+        bigint id PK
+        uuid conversation_id FK "(conversation_id, reporter_token) で一意"
+        varchar reporter_token "通報した参加者の session_token"
+        varchar reason
+        varchar status "open / reviewing / actioned / rejected"
+        timestamptz created_at
+    }
+
+    banned_identifiers {
+        bigint id PK
+        varchar identifier_type "ip_hash / device_fingerprint"
+        varchar identifier
+        varchar sanction "warning / suspension / permanent"
+        varchar source "ng_word / report / operator"
+        uuid conversation_id "きっかけになった会話"
+        varchar reason
+        timestamptz banned_until "一時停止の終了日時"
+        timestamptz lifted_at "解除した日時"
+        timestamptz created_at
+    }
+
+    infringement_claims {
+        bigint id PK
+        varchar name
+        varchar email
+        varchar infringed_right "privacy / defamation / copyright / other"
+        text details
+        varchar status
+        timestamptz created_at
+    }
+
+    ng_words {
+        bigint id PK
+        varchar word UK
+        varchar category
+        boolean is_active
+        timestamptz created_at
+    }
+
+    topic_daily_stats {
+        date stat_date PK "日本時間"
+        int topic_id PK "削除したトピックの行も残す"
+        smallint room_type PK
+        int queued_count
+        int matched_count
+        int left_count
+        bigint total_wait_ms
+        timestamptz updated_at
+    }
+
+    geo_daily_stats {
+        date stat_date PK "日本時間"
+        varchar country_code PK
+        varchar prefecture PK
+        int connection_count
+        int report_count
+        timestamptz updated_at
+    }
+```
+
+`infringement_claims`・`ng_words`・`geo_daily_stats` は、他のテーブルと関係を持たない。
+`messages.sender_token` と `reports.reporter_token` は、同じ会話の
+`conversation_participants.session_token` を指すが、外部キーは張っていない。
+
+各テーブルを読み書きするモジュール（[モジュール間の依存ルール](#モジュール間の依存ルール)）。
+
+| テーブル | モジュール |
+| --- | --- |
+| `topics` | `topic` |
+| `conversations`・`conversation_participants` | `matching` が会話の成立時に作り、`chat` が会話の終了と通報を書き込む（[ADR-0010](docs/adr/0010-split-the-conversation-tables-by-lifecycle-phase.md)） |
+| `messages`・`retained_messages` | `chat` |
+| `reports`・`banned_identifiers`・`infringement_claims` | `report` |
+| `ng_words` | `moderation` |
+| `topic_daily_stats`・`geo_daily_stats` | `matching` |
+
 - マイグレーションは `db/migrations/`。`cmd/migrate` がembedして適用する。
   `go run ./cmd/migrate down` で1つ戻せる。
 - 本番ではデプロイがサービスを切り替える前にマイグレーションを流し、ロールバックでは戻さない。
