@@ -23,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/yosuke318/anontopic/internal/activity"
 	"github.com/yosuke318/anontopic/internal/capacity"
 	"github.com/yosuke318/anontopic/internal/chat"
 	"github.com/yosuke318/anontopic/internal/geoip"
@@ -122,12 +123,20 @@ func run() error {
 	// is what knows who those are and holds what was said.
 	reports := report.NewService(report.NewPostgresRepository(pool), reportedConversations{chats}, bans)
 
+	presence := topicPresence{chats, matches}
+
+	// The alarms that mail the operator as users arrive read what this writes
+	// to the log.
+	go activity.NewService(activityCounter{topics, presence}, activity.NewRedisStore(rdb), activity.Options{
+		Interval: envDuration("ACTIVITY_INTERVAL", activity.DefaultInterval),
+	}).Run(ctx)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", handleHealth)
 	mux.HandleFunc("GET /readyz", handleReady(pool, rdb))
 	session.NewHandler(sessions).Register(mux)
 	chat.NewHandler(chats, sessions, limits, allowedOrigins).Register(mux)
-	topic.NewHandler(topics, adminToken, topicPresence{chats, matches}).Register(mux)
+	topic.NewHandler(topics, adminToken, presence).Register(mux)
 	matching.NewHandler(matches, sessions).Register(mux)
 	report.NewHandler(reports, sessions, limits, adminToken).Register(mux)
 
@@ -342,6 +351,37 @@ func (p topicPresence) Count(ctx context.Context, topicIDs []int) (map[int]topic
 		counts[id] = topic.Presence{Connected: connected[id], Waiting: waiting[id]}
 	}
 	return counts, nil
+}
+
+// activityCounter counts every user the service holds, waiting or connected,
+// under every topic. An inactive topic is counted too, because the
+// conversations already held under it go on.
+type activityCounter struct {
+	topics   *topic.Service
+	presence topicPresence
+}
+
+func (c activityCounter) Count(ctx context.Context) (int, error) {
+	topics, err := c.topics.List(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	ids := make([]int, 0, len(topics))
+	for _, t := range topics {
+		ids = append(ids, t.ID)
+	}
+
+	counts, err := c.presence.Count(ctx, ids)
+	if err != nil {
+		return 0, err
+	}
+
+	users := 0
+	for _, p := range counts {
+		users += p.Connected + p.Waiting
+	}
+	return users, nil
 }
 
 // reportedConversations carries what the report module asks about a
