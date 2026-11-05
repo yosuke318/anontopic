@@ -4,17 +4,20 @@ import type { Metadata } from "next";
 import { AdSlot } from "@/components/ad-slot";
 import { SiteChrome } from "@/components/site-chrome";
 import { absoluteUrl, siteDescription, siteName, siteTagline } from "@/lib/site";
+import { topicPages } from "@/lib/topic-pages";
 
 export const metadata: Metadata = {
   alternates: { canonical: "/" },
 };
 
-const lead = `${siteName}は、選んだトピックについて匿名でテキストチャットできるサービスです。会員登録はいりません。雑談も、趣味の話も、少し聞いてほしいことも、話題を選ぶところから始まります。`;
+const lead = `${siteName}は、話したいトピックを選んで、知らない誰かと匿名でテキストチャットできるサービスです。会員登録はいらず、無料で使えます。雑談も、趣味の話も、少し聞いてほしいことも、話題を選ぶところからチャットが始まります。`;
+
+const heroLines = ["話題を選んで、", "知らない誰かと匿名でチャット。"];
 
 const features = [
   {
     title: "会員登録がいらない",
-    body: "メールアドレスもプロフィールも登録しません。ブラウザを開いてトピックを選ぶだけで話しはじめられます。",
+    body: "メールアドレスもプロフィールも登録しません。スマホでもパソコンでも、ブラウザを開いてトピックを選ぶだけでチャットを始められます。",
   },
   {
     title: "話題から相手が決まる",
@@ -69,7 +72,37 @@ const safeguards = [
 
 const purpose = `出会い・交際・性的な目的での利用、対面の約束、連絡先の交換は禁止しています。性別や年齢、地域で相手を指定する機能も持ちません。${siteName}は、話題について話すためだけの場所です。`;
 
-const closing = "トピックを選ぶだけで始められます。登録も、プロフィールもいりません。";
+const closing = "トピックを選ぶだけでチャットを始められます。登録も、プロフィールもいりません。";
+
+const topicsHeading = "話せるトピック";
+const topicsLead = "トピックごとに、どんな話ができるかを紹介しています。";
+
+const faqHeading = "よくある質問";
+const faqs = [
+  {
+    question: "無料で使えますか",
+    answer: "無料です。会員登録も、アプリのインストールもいりません。",
+  },
+  {
+    question: "スマホでも使えますか",
+    answer: "使えます。スマホやパソコンのブラウザから、そのままチャットを始められます。",
+  },
+  {
+    question: "相手に自分のことは伝わりますか",
+    answer:
+      "名前やプロフィールは相手に伝わりません。チャットの中では、参加者は「参加者A」のような決まった呼び名で表示されます。",
+  },
+  {
+    question: "チャットの内容は残りますか",
+    answer:
+      "会話を読み返す機能はありません。会話ログは 90 日で自動的に削除します。通報された会話だけは、対応のために長く保持します。",
+  },
+  {
+    question: "出会い目的で使えますか",
+    answer:
+      "使えません。出会いや交際を目的とした利用、連絡先の交換、会う約束は禁止しています。話題について話すためのチャットです。",
+  },
+];
 
 export default function HomePage() {
   const jsonLd = {
@@ -91,9 +124,9 @@ export default function HomePage() {
       <section className="mx-auto w-full max-w-5xl px-5 py-16 sm:py-24">
         <p className="text-brand-ink text-sm font-bold tracking-wide">{siteTagline}</p>
         <h1 className="mt-4 max-w-2xl text-4xl leading-tight font-bold tracking-tight sm:text-5xl">
-          話したいことだけを持って、
+          {heroLines[0]}
           <br />
-          知らない誰かと話す。
+          {heroLines[1]}
         </h1>
         <p className="text-muted mt-6 max-w-xl text-lg leading-8">{lead}</p>
         <div className="mt-10 flex flex-col gap-3 sm:flex-row">
@@ -101,7 +134,7 @@ export default function HomePage() {
             href="/topics"
             className="bg-brand text-brand-contrast hover:bg-brand-hover shadow-brand inline-flex h-12 items-center justify-center rounded-full px-8 text-base font-bold transition-colors"
           >
-            トピックを選んで話しはじめる
+            トピックを選んでチャットを始める
           </Link>
           <Link
             href="/about"
@@ -138,6 +171,24 @@ export default function HomePage() {
         </ol>
       </section>
 
+      <section className="mx-auto w-full max-w-5xl px-5 pb-16">
+        <h2 className="text-2xl font-bold tracking-tight sm:text-3xl">{topicsHeading}</h2>
+        <p className="text-muted mt-4 leading-7">{topicsLead}</p>
+        <ul className="mt-8 grid gap-4 sm:grid-cols-2">
+          {topicPages.map((page) => (
+            <li key={page.slug}>
+              <Link
+                href={`/topics/${page.slug}`}
+                className="border-line hover:bg-surface block h-full rounded-2xl border p-6 transition-colors"
+              >
+                <h3 className="font-bold">{page.heading}</h3>
+                <p className="text-muted mt-2 leading-7">{page.lead}</p>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </section>
+
       <AdSlot className="mx-auto w-full max-w-5xl px-5 pb-16" />
 
       <section className="border-line bg-surface border-y">
@@ -167,6 +218,18 @@ export default function HomePage() {
         <p className="border-line text-muted mt-10 rounded-2xl border border-dashed p-6 leading-7">
           {purpose}
         </p>
+      </section>
+
+      <section className="mx-auto w-full max-w-5xl px-5 pb-16">
+        <h2 className="text-2xl font-bold tracking-tight sm:text-3xl">{faqHeading}</h2>
+        <dl className="mt-8 grid gap-6">
+          {faqs.map((faq) => (
+            <div key={faq.question} className="border-line rounded-2xl border p-6">
+              <dt className="font-bold">{faq.question}</dt>
+              <dd className="text-muted mt-2 leading-7">{faq.answer}</dd>
+            </div>
+          ))}
+        </dl>
       </section>
 
       <section className="border-line bg-surface border-t">
