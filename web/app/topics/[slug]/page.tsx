@@ -8,7 +8,7 @@ import { absoluteUrl, siteName } from "@/lib/site";
 import { findTopicPage, topicPages } from "@/lib/topic-pages";
 
 // 紹介ページの文章はコードの中にあるため、ビルド時に静的に生成する。用意していない
-// slug は 404 にする。
+// slugは404にする。
 export const dynamicParams = false;
 
 export function generateStaticParams() {

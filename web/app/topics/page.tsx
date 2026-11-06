@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { Suspense } from "react";
 import type { Metadata } from "next";
 
@@ -33,12 +32,14 @@ function Notice({ title, body }: { title: string; body: string }) {
     <div className="border-line rounded-2xl border p-6">
       <h2 className="font-bold">{title}</h2>
       <p className="text-muted mt-3 leading-7">{body}</p>
-      <Link
+      {/* 読み込みに失敗した画面から、ページ全体をサーバーから取り直す。 */}
+      {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+      <a
         href="/topics"
         className="border-line hover:bg-surface mt-6 inline-flex h-11 items-center justify-center rounded-full border px-6 text-sm font-medium transition-colors"
       >
         読み込み直す
-      </Link>
+      </a>
     </div>
   );
 }
@@ -90,7 +91,7 @@ async function Picker({ initialTopicName }: { initialTopicName: string | null })
   return <TopicPicker topics={topics} initialTopicName={initialTopicName} />;
 }
 
-// トピックの紹介ページから来たときは、?topic= に紹介ページの slug が付く。
+// トピックの紹介ページから来たときは、?topic=に紹介ページのslugが付く。
 export default async function TopicsPage({ searchParams }: PageProps<"/topics">) {
   const { topic } = await searchParams;
   const initialTopicName =

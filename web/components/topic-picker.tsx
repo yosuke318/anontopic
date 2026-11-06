@@ -51,7 +51,7 @@ function messageForError(error: unknown): string {
   return "サーバーに接続できませんでした。通信状況を確認してください。";
 }
 
-// initialTopicName は最初から選んでおくトピックの名前。選べないトピックや、一覧に無い
+// initialTopicNameは最初から選んでおくトピックの名前。選べないトピックや、一覧に無い
 // 名前のときは何も選ばない。
 function initialTopicId(topics: Topic[], name: string | null): number | null {
   if (name === null || comingSoonTopicNames.has(name)) {
