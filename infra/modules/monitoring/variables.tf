@@ -133,3 +133,22 @@ variable "retention_log_group_name" {
   type        = string
   default     = null
 }
+
+# --- 利用者の人数 ---
+
+variable "activity_log_group_name" {
+  description = "API のサーバーのログを受けるロググループの名前。指定すると、サーバーが 10 秒ごとに書く人数のログ（メッセージが \"activity\"）から、待機中と会話中の人数の合計を拾い、activity_thresholds の人数に届いたときに通知する。null のときは作らない。"
+  type        = string
+  default     = null
+}
+
+variable "activity_thresholds" {
+  description = "待機中と会話中の人数の合計がこの値に届いたときに通知する。どれも、人数が 0 に戻るまでは一度しか通知しない。"
+  type        = list(number)
+  default     = [1, 10, 100]
+
+  validation {
+    condition     = alltrue([for n in var.activity_thresholds : n >= 1 && floor(n) == n])
+    error_message = "activity_thresholds は 1 以上の整数で指定する。"
+  }
+}

@@ -119,4 +119,5 @@ module "monitoring" {
   redis_cluster_id            = module.cache.cluster_id
   nat_instance_id             = module.network.nat_instance_id
   retention_log_group_name    = module.compute.log_group_name
+  activity_log_group_name     = module.compute.log_group_name
 }

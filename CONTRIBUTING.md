@@ -2,7 +2,7 @@
 
 ## モジュール間の依存ルール
 
-`internal/` 配下の各パッケージ（`matching`, `chat`, `topic`, `moderation`, `report`, `retention`）は、
+`internal/` 配下の各パッケージ（`matching`, `chat`, `topic`, `moderation`, `report`, `retention`, `activity`）は、
 モジュラーモノリスにおける独立したモジュールとして扱う。将来サービス分割する際のコストを抑えるため、
 以下のルールを守ること。
 
