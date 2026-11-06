@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Zen_Maru_Gothic } from "next/font/google";
 
 import { adsenseClient } from "@/lib/ads";
-import { siteDescription, siteName, siteTagline, siteUrl } from "@/lib/site";
+import { siteDescription, siteName, siteUrl } from "@/lib/site";
 import "./globals.css";
 
 // 日本語の字形は Google Fonts が文字の範囲ごとに分けて配るため、ブラウザはページで使う
@@ -18,23 +18,30 @@ const zenMaruGothic = Zen_Maru_Gothic({
 export const metadata: Metadata = {
   metadataBase: siteUrl,
   title: {
-    default: `${siteName} - ${siteTagline}`,
+    default: `匿名チャット「${siteName}」- 登録不要で話題を選んでチャット`,
     template: `%s | ${siteName}`,
   },
   description: siteDescription,
   applicationName: siteName,
-  keywords: ["匿名チャット", "トピック", "雑談", "趣味", "相談", "テキストチャット", "登録不要"],
+  keywords: [
+    "チャット",
+    "匿名チャット",
+    "雑談チャット",
+    "トピック",
+    "テキストチャット",
+    "登録不要",
+  ],
   openGraph: {
     type: "website",
     locale: "ja_JP",
     siteName,
-    title: `${siteName} - ${siteTagline}`,
+    title: `匿名チャット「${siteName}」- 登録不要で話題を選んでチャット`,
     description: siteDescription,
     url: "/",
   },
   twitter: {
     card: "summary_large_image",
-    title: `${siteName} - ${siteTagline}`,
+    title: `匿名チャット「${siteName}」- 登録不要で話題を選んでチャット`,
     description: siteDescription,
   },
   robots: {

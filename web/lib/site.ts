@@ -3,7 +3,7 @@ export const siteName = "よもやま";
 export const siteTagline = "話したいことから始まる匿名チャット";
 
 export const siteDescription =
-  "会員登録なしで、選んだトピックについて匿名でテキストチャットできるサービス。雑談・趣味・相談のための場所です。";
+  "会員登録なし・無料で使える匿名チャット。雑談、ゲーム、映画・ドラマ、勉強・仕事など、話したいトピックを選んで、知らない誰かとテキストでチャットできます。";
 
 const defaultSiteUrl = "http://localhost:3000";
 

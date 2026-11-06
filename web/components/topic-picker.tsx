@@ -51,9 +51,26 @@ function messageForError(error: unknown): string {
   return "サーバーに接続できませんでした。通信状況を確認してください。";
 }
 
-export function TopicPicker({ topics }: { topics: Topic[] }) {
+// initialTopicNameは最初から選んでおくトピックの名前。選べないトピックや、一覧に無い
+// 名前のときは何も選ばない。
+function initialTopicId(topics: Topic[], name: string | null): number | null {
+  if (name === null || comingSoonTopicNames.has(name)) {
+    return null;
+  }
+  return topics.find((topic) => topic.name === name)?.id ?? null;
+}
+
+export function TopicPicker({
+  topics,
+  initialTopicName = null,
+}: {
+  topics: Topic[];
+  initialTopicName?: string | null;
+}) {
   const router = useRouter();
-  const [topicId, setTopicId] = useState<number | null>(null);
+  const [topicId, setTopicId] = useState<number | null>(() =>
+    initialTopicId(topics, initialTopicName),
+  );
   const [roomType, setRoomType] = useState<RoomType>(2);
   const [gender, setGender] = useState<Gender | "">("");
   const [ageBand, setAgeBand] = useState<AgeBand | "">("");

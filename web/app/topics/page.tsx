@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import { SiteChrome } from "@/components/site-chrome";
 import { TopicPicker } from "@/components/topic-picker";
 import { siteName } from "@/lib/site";
+import { findTopicPage } from "@/lib/topic-pages";
 import { fetchTopics, type Topic } from "@/lib/topics";
 
 const lead =
@@ -31,6 +32,8 @@ function Notice({ title, body }: { title: string; body: string }) {
     <div className="border-line rounded-2xl border p-6">
       <h2 className="font-bold">{title}</h2>
       <p className="text-muted mt-3 leading-7">{body}</p>
+      {/* 読み込みに失敗した画面から、ページ全体をサーバーから取り直す。 */}
+      {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
       <a
         href="/topics"
         className="border-line hover:bg-surface mt-6 inline-flex h-11 items-center justify-center rounded-full border px-6 text-sm font-medium transition-colors"
@@ -63,7 +66,7 @@ function PickerSkeleton() {
   );
 }
 
-async function Picker() {
+async function Picker({ initialTopicName }: { initialTopicName: string | null }) {
   let topics: Topic[];
   try {
     topics = await fetchTopics();
@@ -85,10 +88,15 @@ async function Picker() {
     );
   }
 
-  return <TopicPicker topics={topics} />;
+  return <TopicPicker topics={topics} initialTopicName={initialTopicName} />;
 }
 
-export default function TopicsPage() {
+// トピックの紹介ページから来たときは、?topic=に紹介ページのslugが付く。
+export default async function TopicsPage({ searchParams }: PageProps<"/topics">) {
+  const { topic } = await searchParams;
+  const initialTopicName =
+    typeof topic === "string" ? (findTopicPage(topic)?.topicName ?? null) : null;
+
   return (
     <SiteChrome>
       <div className="mx-auto w-full max-w-3xl px-5 py-16">
@@ -96,7 +104,7 @@ export default function TopicsPage() {
         <p className="text-muted mt-6 leading-8">{lead}</p>
         <div className="mt-12">
           <Suspense fallback={<PickerSkeleton />}>
-            <Picker />
+            <Picker initialTopicName={initialTopicName} />
           </Suspense>
         </div>
       </div>

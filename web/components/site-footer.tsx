@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { siteName } from "@/lib/site";
+import { topicPages } from "@/lib/topic-pages";
 
 const purpose = `${siteName}は、雑談・趣味・相談のための匿名テキストチャットです。出会いや交際を目的とした利用はできません。`;
 
@@ -18,6 +19,17 @@ export function SiteFooter() {
     <footer className="border-line mt-auto border-t">
       <div className="text-muted mx-auto flex w-full max-w-5xl flex-col gap-4 px-5 py-8 text-sm">
         <p>{purpose}</p>
+        <nav aria-label="トピック" className="flex flex-wrap gap-x-5 gap-y-2">
+          {topicPages.map((page) => (
+            <Link
+              key={page.slug}
+              href={`/topics/${page.slug}`}
+              className="hover:text-foreground whitespace-nowrap transition-colors"
+            >
+              {page.topicName}
+            </Link>
+          ))}
+        </nav>
         <nav aria-label="フッター" className="flex flex-wrap gap-x-5 gap-y-2">
           {links.map((link) => (
             <Link
