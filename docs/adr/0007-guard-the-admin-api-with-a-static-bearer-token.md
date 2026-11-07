@@ -1,6 +1,6 @@
 # ADR-0007: 管理 API を環境変数の Bearer トークンで保護する
 
-- ステータス: Accepted
+- ステータス: Superseded by ADR-0047
 - 日付: 2026-08-26
 - 関連 issue: YOSUKE-122
 
