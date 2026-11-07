@@ -3,11 +3,10 @@
 - ステータス: Accepted
 - 日付: 2026-11-06
 - 関連 issue: YOSUKE-231
-- Supersedes: ADR-0007
 
 ## 文脈
 
-ADR-0007 は、管理画面ができた時点で管理 API の守り方を見直すと決めていた。その管理画面ができた。
+ADR-0007（この ADR で supersede する）は、管理画面ができた時点で管理 API の守り方を見直すと決めていた。その管理画面ができた。
 
 - 管理画面（`anontopic-admin`、Rails）はラズパイの Docker で動く。DB を持たず、本体の管理 API
   （`/api/admin/*`）を `ADMIN_API_TOKEN` で呼ぶ。トークンは Rails のサーバー側だけに置き、ブラウザには渡さない。
@@ -22,7 +21,7 @@ ADR-0007 は、管理画面ができた時点で管理 API の守り方を見直
   `admin.anonymtopic.com` を Access のアプリケーションの内側に置く。ログイン方法は Google（OIDC）だけにし、
   許可したメールアドレスだけを通す。OIDC の RP（クライアント）になるのは Access で、Rails ではない。
 - **Rails は Access が署名した JWT（`Cf-Access-Jwt-Assertion`）を確かめる。** 発行元（チームのドメイン）と
-  AUD タグを照合し、確かめられないリクエストは 403 で断る。Tunnel を通らずに届いたリクエストへの備えで、
+  AUD タグ（Access のアプリケーションごとの値で、JWT の `aud` クレームに入る）を照合し、確かめられないリクエストは 403 で断る。Tunnel を通らずに届いたリクエストへの備えで、
   鍵は Access が公開するもの（`/cdn-cgi/access/certs`）を取りに行く。誰が開いたかは、トークンの
   メールアドレスを Rails のログに残す。
 - **本体の管理 API は `ADMIN_API_TOKEN`（ADR-0007）のまま守る。** 管理画面のサーバーと本体のサーバーの間の
