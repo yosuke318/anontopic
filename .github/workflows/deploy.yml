@@ -3,6 +3,9 @@
 #
 # 手動で実行すると、API とフロントエンドを ECR に入っている過去のイメージに戻す（ロールバック）。
 # マイグレーションは戻さない。理由は ADR-0034。
+#
+# CI から動いたデプロイは、承認されて動き出した時点で main の先頭のコミットでなければ何もしない。
+# 古い実行を再実行しても、新しいデプロイを古いもので上書きしない。理由は ADR-0049。
 name: Deploy
 
 on:
@@ -128,6 +131,7 @@ jobs:
       push_image: true
       migrate: true
       skip_if_absent: true
+      latest_only: true
 
   # dev が作られていればそこで通ってから、prod の承認を待つ。
   prod:
@@ -140,6 +144,7 @@ jobs:
       image_tag: ${{ needs.build.outputs.sha }}
       push_image: true
       migrate: true
+      latest_only: true
 
   rollback:
     if: github.event_name == 'workflow_dispatch'
