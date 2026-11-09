@@ -25,9 +25,9 @@ const comingSoonTopicNames = new Set(["音楽", "スポーツ"]);
 const comingSoonRoomTypes = new Set<RoomType>([3]);
 const comingSoonLabel = "近日公開";
 
-const waitingLabel = "待っている人あり";
+const waitingLabel = "誰かが待ってるよ";
 const waitingNotice =
-  "「待っている人あり」は、同じトピックと人数を選んで相手を待っている人がいるという意味です。";
+  "「誰かが待ってるよ」は、同じトピックと人数を選んで相手を待っている人がいるという意味です。";
 
 // WaitingBadgeはキューに待っている人がいることを示す。人数は出さない。
 function WaitingBadge() {
