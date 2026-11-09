@@ -236,6 +236,10 @@ func TestQueuesEndpointAnswersWithoutASession(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
 
+	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("Cache-Control = %q, want no-store", got)
+	}
+
 	body := decodeBody[queueStatusListResponse](t, rec)
 	want := []queueStatusResponse{
 		{TopicID: 1, RoomType: 2, Waiting: false},

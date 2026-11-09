@@ -307,6 +307,15 @@ paths:
       responses:
         "200":
           description: 有効なトピックのキューの一覧。トピックの表示順に、2 人ルーム・3 人ルームの順で並ぶ
+          headers:
+            Cache-Control:
+              description: |
+                `no-store`。答えはサーバーが `MATCHING_STATUS_TTL` の間だけ使い回すもので、
+                ブラウザや途中のプロキシ・CDN にそれより長く残させない
+              schema:
+                type: string
+                examples:
+                  - no-store
           content:
             application/json:
               schema:

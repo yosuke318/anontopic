@@ -151,6 +151,10 @@ func (h *Handler) handleQueues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The answer is reused for StatusTTL on the server and read again by the
+	// screen at its own interval, so no cache between them may keep it longer.
+	w.Header().Set("Cache-Control", "no-store")
+
 	body := queueStatusListResponse{Queues: make([]queueStatusResponse, 0, len(statuses))}
 	for _, st := range statuses {
 		body.Queues = append(body.Queues, queueStatusResponse{
