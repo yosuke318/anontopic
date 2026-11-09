@@ -226,6 +226,13 @@ func (t fakeTopics) IsActive(_ context.Context, id int) (bool, error) {
 	return slices.Contains(t.active, id), nil
 }
 
+func (t fakeTopics) ActiveIDs(_ context.Context) ([]int, error) {
+	if t.err != nil {
+		return nil, t.err
+	}
+	return slices.Clone(t.active), nil
+}
+
 // fakeRate holds back every request once allow is false, records the subjects
 // it was asked about, and names retryAfter as the wait it wants.
 type fakeRate struct {
@@ -699,5 +706,86 @@ func TestWaitingByTopicCountsTheUsersOfBothRoomTypes(t *testing.T) {
 	want = map[int]int{1: 0, 2: 0}
 	if !maps.Equal(counts, want) {
 		t.Fatalf("counts after the wait = %v, want %v", counts, want)
+	}
+}
+
+func TestQueueStatusesTellWhichQueuesSomeoneWaitsIn(t *testing.T) {
+	svc, _ := newTestService(t, newFakeStore(), newFakeRepository())
+
+	join(t, svc, "alice", Queue{TopicID: 1, RoomType: 3})
+	join(t, svc, "bob", Queue{TopicID: 1, RoomType: 3})
+	join(t, svc, "carol", Queue{TopicID: 2, RoomType: 2})
+
+	statuses, err := svc.QueueStatuses(context.Background())
+	if err != nil {
+		t.Fatalf("QueueStatuses: %v", err)
+	}
+	want := []QueueStatus{
+		{Queue: Queue{TopicID: 1, RoomType: 2}, Waiting: false},
+		{Queue: Queue{TopicID: 1, RoomType: 3}, Waiting: true},
+		{Queue: Queue{TopicID: 2, RoomType: 2}, Waiting: true},
+		{Queue: Queue{TopicID: 2, RoomType: 3}, Waiting: false},
+	}
+	if !slices.Equal(statuses, want) {
+		t.Fatalf("statuses = %+v, want %+v", statuses, want)
+	}
+}
+
+func TestQueueStatusesReuseOneAnswerForTheStatusTTL(t *testing.T) {
+	svc, clock := newTestService(t, newFakeStore(), newFakeRepository())
+
+	if _, err := svc.QueueStatuses(context.Background()); err != nil {
+		t.Fatalf("QueueStatuses: %v", err)
+	}
+	join(t, svc, "alice", Queue{TopicID: 1, RoomType: 2})
+
+	statuses, err := svc.QueueStatuses(context.Background())
+	if err != nil {
+		t.Fatalf("QueueStatuses: %v", err)
+	}
+	if statuses[0].Waiting {
+		t.Fatalf("statuses = %+v, want the answer read before alice queued", statuses)
+	}
+
+	clock.Advance(DefaultStatusTTL)
+	statuses, err = svc.QueueStatuses(context.Background())
+	if err != nil {
+		t.Fatalf("QueueStatuses: %v", err)
+	}
+	if !statuses[0].Waiting {
+		t.Fatalf("statuses = %+v, want alice to be seen once the answer expired", statuses)
+	}
+}
+
+func TestQueueStatusesLeaveOutAWaitThatRanOut(t *testing.T) {
+	svc, clock := newTestService(t, newFakeStore(), newFakeRepository())
+
+	join(t, svc, "alice", Queue{TopicID: 1, RoomType: 2})
+	clock.Advance(DefaultWaitTTL)
+
+	statuses, err := svc.QueueStatuses(context.Background())
+	if err != nil {
+		t.Fatalf("QueueStatuses: %v", err)
+	}
+	if slices.ContainsFunc(statuses, func(st QueueStatus) bool { return st.Waiting }) {
+		t.Fatalf("statuses = %+v, want nobody waiting", statuses)
+	}
+}
+
+func TestQueueStatusesDoNotKeepAFailedRead(t *testing.T) {
+	svc := NewService(newFakeStore(), newFakeRepository(), fakeTopics{err: errors.New("down")},
+		fakeBans{}, nil, nil, Options{})
+
+	if _, err := svc.QueueStatuses(context.Background()); err == nil {
+		t.Fatal("QueueStatuses succeeded, want the error of the topic catalogue")
+	}
+
+	svc.topics = fakeTopics{active: []int{1}}
+	statuses, err := svc.QueueStatuses(context.Background())
+	if err != nil {
+		t.Fatalf("QueueStatuses: %v", err)
+	}
+	if len(statuses) != 2 {
+		t.Fatalf("statuses = %+v, want the two queues of topic 1", statuses)
 	}
 }

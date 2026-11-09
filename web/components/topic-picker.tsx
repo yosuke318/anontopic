@@ -15,6 +15,7 @@ import {
 import { issueSession, joinQueue, roomTypes, type RoomType } from "@/lib/matching";
 import { acceptTerms, useTermsAccepted } from "@/lib/terms-consent";
 import type { Topic } from "@/lib/topics";
+import { useQueueStatuses } from "@/lib/use-queue-statuses";
 
 const siteNotice =
   "このサービスは雑談・趣味・相談のためのものです。出会いや交際を目的とした利用、連絡先の交換はできません。はじめる前に";
@@ -23,6 +24,20 @@ const siteNotice =
 const comingSoonTopicNames = new Set(["音楽", "スポーツ"]);
 const comingSoonRoomTypes = new Set<RoomType>([3]);
 const comingSoonLabel = "近日公開";
+
+const waitingLabel = "待っている人あり";
+const waitingNotice =
+  "「待っている人あり」は、同じトピックと人数を選んで相手を待っている人がいるという意味です。";
+
+// WaitingBadgeはキューに待っている人がいることを示す。人数は出さない。
+function WaitingBadge() {
+  return (
+    <span className="ml-2 inline-flex items-center gap-1 text-xs font-medium">
+      <span aria-hidden className="bg-chat-online h-2 w-2 rounded-full" />
+      {waitingLabel}
+    </span>
+  );
+}
 
 const disabledOptionClass = "cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400";
 
@@ -77,6 +92,7 @@ export function TopicPicker({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const termsAccepted = useTermsAccepted();
+  const isWaiting = useQueueStatuses();
   const [agreed, setAgreed] = useState(false);
   const canStart = topicId !== null && (termsAccepted || agreed);
 
@@ -112,6 +128,7 @@ export function TopicPicker({
       <fieldset>
         <legend className="text-xl font-bold tracking-tight">話したいトピック</legend>
         <p className="text-muted mt-2 leading-7">ひとつ選んでください。</p>
+        <p className="text-muted mt-1 text-sm leading-6">{waitingNotice}</p>
         <div className="mt-6 flex flex-wrap gap-3">
           {topics.map((topic) => {
             const comingSoon = comingSoonTopicNames.has(topic.name);
@@ -137,6 +154,7 @@ export function TopicPicker({
                 />
                 {topic.name}
                 {comingSoon && <span className="ml-2 text-xs">{comingSoonLabel}</span>}
+                {!comingSoon && isWaiting(topic.id, roomType) && <WaitingBadge />}
               </label>
             );
           })}
@@ -173,6 +191,7 @@ export function TopicPicker({
                   {comingSoon && (
                     <span className="ml-2 text-xs font-medium">{comingSoonLabel}</span>
                   )}
+                  {!comingSoon && topicId !== null && isWaiting(topicId, value) && <WaitingBadge />}
                 </span>
                 <span className={`mt-2 block text-sm leading-6 ${comingSoon ? "" : "text-muted"}`}>
                   {roomTypeLabels[value].body}

@@ -69,3 +69,42 @@ export async function leaveQueue(): Promise<void> {
     throw new ApiError(res.status, retryAfterSeconds(res));
   }
 }
+
+// QueueStatusは1つのキュー（トピックとルーム人数の組）に待っている人がいるかどうか。
+// 人数はAPIが返さないため持たない。
+export type QueueStatus = {
+  topic_id: number;
+  room_type: RoomType;
+  waiting: boolean;
+};
+
+function isQueueStatus(value: unknown): value is QueueStatus {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const status = value as QueueStatus;
+  return (
+    typeof status.topic_id === "number" &&
+    roomTypes.includes(status.room_type) &&
+    typeof status.waiting === "boolean"
+  );
+}
+
+// fetchQueueStatusesは有効なトピックのキューごとに、待っている人がいるかを読む。
+// セッションを持つ前に呼ぶため、Cookieは送らない。
+export async function fetchQueueStatuses(): Promise<QueueStatus[]> {
+  const res = await fetch(`${apiBaseUrl()}/api/matching/queues`, {
+    credentials: "omit",
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    throw new ApiError(res.status, retryAfterSeconds(res));
+  }
+
+  const body: unknown = await res.json();
+  const queues = typeof body === "object" && body !== null && "queues" in body ? body.queues : null;
+  if (!Array.isArray(queues) || !queues.every(isQueueStatus)) {
+    throw new Error("queue status list is malformed");
+  }
+  return queues;
+}

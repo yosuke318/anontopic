@@ -34,6 +34,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/matching", h.handleJoin)
 	mux.HandleFunc("GET /api/matching", h.handleState)
 	mux.HandleFunc("DELETE /api/matching", h.handleLeave)
+	mux.HandleFunc("GET /api/matching/queues", h.handleQueues)
 }
 
 // joinRequest is the queue the client asks to wait in. It holds the fields of
@@ -57,6 +58,18 @@ type stateResponse struct {
 type room struct {
 	ID        string    `json:"id"`
 	StartedAt time.Time `json:"started_at"`
+}
+
+// queueStatusResponse says whether anyone waits in one queue.
+type queueStatusResponse struct {
+	TopicID  int  `json:"topic_id"`
+	RoomType int  `json:"room_type"`
+	Waiting  bool `json:"waiting"`
+}
+
+// queueStatusListResponse holds the queues of every active topic.
+type queueStatusListResponse struct {
+	Queues []queueStatusResponse `json:"queues"`
 }
 
 // The values of stateResponse.State.
@@ -127,6 +140,27 @@ func (h *Handler) handleLeave(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleQueues answers the selection screen with whether anyone waits in
+// each queue. It needs no session: the screen asks before the user has one.
+func (h *Handler) handleQueues(w http.ResponseWriter, r *http.Request) {
+	statuses, err := h.svc.QueueStatuses(r.Context())
+	if err != nil {
+		writeError(w, "read the queue statuses", err)
+		return
+	}
+
+	body := queueStatusListResponse{Queues: make([]queueStatusResponse, 0, len(statuses))}
+	for _, st := range statuses {
+		body.Queues = append(body.Queues, queueStatusResponse{
+			TopicID:  st.Queue.TopicID,
+			RoomType: st.Queue.RoomType,
+			Waiting:  st.Waiting,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, body)
 }
 
 // authenticate resolves the session the request carries.
