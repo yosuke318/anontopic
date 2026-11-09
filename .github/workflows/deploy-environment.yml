@@ -58,11 +58,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref }}
-      - uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/anontopic-deploy
-          aws-region: ap-northeast-1
-
       # prod は承認を待つため、承認待ちのデプロイが複数あると承認した順に入れ替わり、古いコミットが
       # 新しいものを上書きしうる。承認されて動き出した時点で main の先頭でなければ入れ替えない。
       # 理由は ADR-0049。
@@ -81,6 +76,13 @@ jobs:
             echo "::warning::$IMAGE_TAG は main の先頭（$head）ではないため、$DEPLOY_ENV のデプロイを飛ばした。main の先頭のデプロイを承認する。"
             echo "latest=false" >> "$GITHUB_OUTPUT"
           fi
+
+      # 飛ばすデプロイは AWS に触れないので、先頭のコミットと分かってから認証する。
+      - uses: aws-actions/configure-aws-credentials@v4
+        if: steps.latest.outputs.latest == 'true'
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/anontopic-deploy
+          aws-region: ap-northeast-1
 
       - name: 環境があるか確かめる
         if: steps.latest.outputs.latest == 'true'
