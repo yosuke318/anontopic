@@ -291,6 +291,38 @@ paths:
         "500":
           $ref: "#/components/responses/InternalServerError"
 
+  /api/matching/queues:
+    get:
+      tags: [matching]
+      operationId: listMatchingQueues
+      summary: キューごとに待っている人がいるかどうかを返す
+      description: |
+        有効なトピックのキュー（トピックとルーム種別の組）ごとに、待っている人がいるかを
+        真偽値で返す。人数は返さない。待機が `MATCHING_WAIT_TTL` を過ぎた利用者は数えない。
+
+        トピック選択画面がセッションを用意する前に呼ぶため、認証は要らない。
+        答えは各サーバーが `MATCHING_STATUS_TTL`（既定 5 秒）の間使い回すため、
+        キューの変化が反映されるまでその分遅れる。理由は
+        [ADR-0048](adr/0048-show-users-whether-anyone-waits-in-a-queue-without-the-count.md) にある。
+      responses:
+        "200":
+          description: 有効なトピックのキューの一覧。トピックの表示順に、2 人ルーム・3 人ルームの順で並ぶ
+          headers:
+            Cache-Control:
+              description: |
+                `no-store`。答えはサーバーが `MATCHING_STATUS_TTL` の間だけ使い回すもので、
+                ブラウザや途中のプロキシ・CDN にそれより長く残させない
+              schema:
+                type: string
+                examples:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MatchingQueueList"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
   /ws/rooms/{roomID}:
     get:
       tags: [chat]
@@ -1503,6 +1535,35 @@ components:
       description: |
         制裁の段階。`warning` はチャット画面に警告を出すだけで利用は止めない。
         `suspension` は `banned_until` まで、`permanent` は無期限に接続とマッチングを拒否する
+
+    MatchingQueueList:
+      type: object
+      required: [queues]
+      properties:
+        queues:
+          type: array
+          items:
+            $ref: "#/components/schemas/MatchingQueueStatus"
+
+    MatchingQueueStatus:
+      type: object
+      description: 1 つのキューに待っている人がいるかどうか
+      required: [topic_id, room_type, waiting]
+      properties:
+        topic_id:
+          type: integer
+          examples:
+            - 1
+        room_type:
+          type: integer
+          enum: [2, 3]
+          examples:
+            - 2
+        waiting:
+          type: boolean
+          description: このキューで待っている人が 1 人以上いれば true
+          examples:
+            - true
 
     MatchingState:
       type: object

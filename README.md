@@ -127,6 +127,11 @@ curl -X DELETE -b cookie.txt localhost:8080/api/matching           # 待機と�
 待っている場合は2人で成立し、`room_type` に2が返る。理由は
 [ADR-0009](docs/adr/0009-fall-back-to-a-two-person-room.md) にある。
 
+`GET /api/matching/queues` は、有効なトピックのキューごとに待っている人がいるかどうかを
+真偽値で返す。人数は返さない。トピック選択画面がセッションを持つ前に呼ぶため認証は要らず、
+答えは `MATCHING_STATUS_TTL` の間サーバーごとに使い回す。理由は
+[ADR-0048](docs/adr/0048-show-users-whether-anyone-waits-in-a-queue-without-the-count.md) にある。
+
 ### チャット
 
 成立した会話には `/ws/rooms/{roomID}` にWebSocketでつなぐ。`roomID` はマッチングが返した
@@ -304,6 +309,7 @@ APIサーバーの設定は環境変数で行う。
 | `TOPIC_CACHE_TTL` | `5m` | トピック一覧をプロセス内に保持する時間。`300s` のようなGoのduration表記 |
 | `MATCHING_WAIT_TTL` | `5m` | 待機キューに並び続けられる時間。超えた利用者はキューから外れる |
 | `MATCHING_FALLBACK_AFTER` | `60s` | 3人ルームの待機がこの時間を超えたら2人で成立させる |
+| `MATCHING_STATUS_TTL` | `5s` | キューごとの待ちの有無（`GET /api/matching/queues`）をプロセス内で使い回す時間 |
 | `CHAT_REJOIN_GRACE` | `30s` | 切断した参加者を待つ時間。接続中が1人以下のままこの時間を超えると会話を終了する |
 | `MODERATION_RELOAD_INTERVAL` | `5m` | NGワード辞書を読み直す間隔。辞書の変更が反映されるまでの最大の遅れになる |
 | `ACTIVITY_INTERVAL` | `10s` | 待機中と会話中の人数の合計を数えてログ（`activity`）に書く間隔。本番ではこのログから、人数が1人・10人・100人に届いたときにメールが届く |

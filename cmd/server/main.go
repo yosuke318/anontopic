@@ -100,13 +100,14 @@ func run() error {
 	matches := matching.NewService(
 		matching.NewRedisStore(rdb),
 		matching.NewPostgresRepository(pool),
-		topics,
+		matchingTopics{topics},
 		matchingBans{bans},
 		sessionParticipants{sessions},
 		limits,
 		matching.Options{
 			WaitTTL:       envDuration("MATCHING_WAIT_TTL", matching.DefaultWaitTTL),
 			FallbackAfter: envDuration("MATCHING_FALLBACK_AFTER", matching.DefaultFallbackAfter),
+			StatusTTL:     envDuration("MATCHING_STATUS_TTL", matching.DefaultStatusTTL),
 		},
 	)
 
@@ -232,6 +233,29 @@ func newBans(pool *pgxpool.Pool, rdb *redis.Client) *report.Bans {
 		Suspension:        envDuration("SANCTION_SUSPENSION", report.DefaultSuspension),
 		WarningTTL:        envDuration("SANCTION_WARNING_TTL", report.DefaultWarningTTL),
 	})
+}
+
+// matchingTopics answers the matching module out of the topic catalogue,
+// with the topics users can queue for told apart by their IDs alone.
+type matchingTopics struct {
+	topics *topic.Service
+}
+
+func (t matchingTopics) IsActive(ctx context.Context, id int) (bool, error) {
+	return t.topics.IsActive(ctx, id)
+}
+
+func (t matchingTopics) ActiveIDs(ctx context.Context) ([]int, error) {
+	topics, err := t.topics.ListActive(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	ids := make([]int, 0, len(topics))
+	for _, tp := range topics {
+		ids = append(ids, tp.ID)
+	}
+	return ids, nil
 }
 
 // matchingBans carries the ban check of the matching module to the ban list

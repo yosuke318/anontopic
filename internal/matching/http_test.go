@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -221,5 +222,37 @@ func TestJoinEndpointAnswersAnAddressAskingTooOften(t *testing.T) {
 				t.Fatalf("Retry-After = %q, want %q", got, c.want)
 			}
 		})
+	}
+}
+
+func TestQueuesEndpointAnswersWithoutASession(t *testing.T) {
+	svc, _ := newTestService(t, newFakeStore(), newFakeRepository())
+	mux := newTestMux(t, svc)
+
+	do(mux, http.MethodPost, "/api/matching", "alice", `{"topic_id":2,"room_type":2}`)
+
+	rec := do(mux, http.MethodGet, "/api/matching/queues", "", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("Cache-Control = %q, want no-store", got)
+	}
+
+	body := decodeBody[queueStatusListResponse](t, rec)
+	want := []queueStatusResponse{
+		{TopicID: 1, RoomType: 2, Waiting: false},
+		{TopicID: 1, RoomType: 3, Waiting: false},
+		{TopicID: 2, RoomType: 2, Waiting: true},
+		{TopicID: 2, RoomType: 3, Waiting: false},
+	}
+	if !slices.Equal(body.Queues, want) {
+		t.Fatalf("queues = %+v, want %+v", body.Queues, want)
+	}
+
+	// The answer holds whether anyone waits, never how many.
+	if strings.Contains(rec.Body.String(), "count") {
+		t.Fatalf("body = %s, want no count", rec.Body.String())
 	}
 }

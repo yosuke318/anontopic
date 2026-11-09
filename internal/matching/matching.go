@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
+	"sync"
 	"time"
 )
 
@@ -37,6 +39,11 @@ const (
 	// read. It only has to outlast the interval at which a waiting client asks
 	// for its state.
 	DefaultRoomTTL = 10 * time.Minute
+
+	// DefaultStatusTTL is how long one answer of QueueStatuses is reused.
+	// Every client on the selection screen asks for it, so the queues are
+	// read once per interval however many clients ask.
+	DefaultStatusTTL = 5 * time.Second
 
 	// roomTypeTwo and roomTypeThree are the room types conversations.room_type
 	// holds. The value is the number of participants.
@@ -180,9 +187,21 @@ type RequestLimiter interface {
 	AllowMatch(ctx context.Context, subject string) (bool, time.Duration, error)
 }
 
-// TopicCatalogue reports whether users can queue for a topic.
+// TopicCatalogue reports which topics users can queue for.
 type TopicCatalogue interface {
 	IsActive(ctx context.Context, id int) (bool, error)
+	// ActiveIDs returns the IDs of every topic users can queue for, in the
+	// order the selection screen shows them.
+	ActiveIDs(ctx context.Context) ([]int, error)
+}
+
+// QueueStatus says whether anyone waits in one queue. It carries no count:
+// the selection screen only tells a user whether someone is there to be
+// matched with, and the reasoning is in
+// docs/adr/0048-show-users-whether-anyone-waits-in-a-queue-without-the-count.md.
+type QueueStatus struct {
+	Queue   Queue
+	Waiting bool
 }
 
 // BanList reports whether any identifier of a user is barred from the
@@ -203,7 +222,15 @@ type Service struct {
 	waitTTL       time.Duration
 	fallbackAfter time.Duration
 	roomTTL       time.Duration
+	statusTTL     time.Duration
 	now           func() time.Time
+
+	// statusMu guards the answer of QueueStatuses kept for statusTTL. It is
+	// held while the queues are read, so that the callers arriving after the
+	// answer expired wait for one read instead of each making their own.
+	statusMu        sync.Mutex
+	statuses        []QueueStatus
+	statusExpiresAt time.Time
 }
 
 // Options configures a Service. The zero value of each field selects the
@@ -216,6 +243,8 @@ type Options struct {
 	FallbackAfter time.Duration
 	// RoomTTL defaults to DefaultRoomTTL.
 	RoomTTL time.Duration
+	// StatusTTL defaults to DefaultStatusTTL.
+	StatusTTL time.Duration
 }
 
 // NewService builds a Service. A nil sessions records nothing but the token
@@ -231,6 +260,9 @@ func NewService(store Store, repo Repository, topics TopicCatalogue, bans BanLis
 	if opts.RoomTTL <= 0 {
 		opts.RoomTTL = DefaultRoomTTL
 	}
+	if opts.StatusTTL <= 0 {
+		opts.StatusTTL = DefaultStatusTTL
+	}
 
 	return &Service{
 		store:         store,
@@ -242,6 +274,7 @@ func NewService(store Store, repo Repository, topics TopicCatalogue, bans BanLis
 		waitTTL:       opts.WaitTTL,
 		fallbackAfter: opts.FallbackAfter,
 		roomTTL:       opts.RoomTTL,
+		statusTTL:     opts.StatusTTL,
 		now:           time.Now,
 	}
 }
@@ -268,6 +301,46 @@ func (s *Service) WaitingByTopic(ctx context.Context, topicIDs []int) (map[int]i
 		counts[q.TopicID] += n
 	}
 	return counts, nil
+}
+
+// QueueStatuses reports, for every queue of every active topic, whether
+// anyone waits in it. A user whose wait passed WaitTTL is not counted. The
+// statuses come in the order of the topics, each topic with its room of two
+// first, and one answer is reused for StatusTTL.
+func (s *Service) QueueStatuses(ctx context.Context) ([]QueueStatus, error) {
+	s.statusMu.Lock()
+	defer s.statusMu.Unlock()
+
+	now := s.now().UTC()
+	// A zero expiry means nothing has been read yet, which a catalogue
+	// without active topics must not be mistaken for.
+	if !s.statusExpiresAt.IsZero() && now.Before(s.statusExpiresAt) {
+		return slices.Clone(s.statuses), nil
+	}
+
+	ids, err := s.topics.ActiveIDs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list active topics: %w", err)
+	}
+
+	queues := make([]Queue, 0, 2*len(ids))
+	for _, id := range ids {
+		queues = append(queues, Queue{TopicID: id, RoomType: roomTypeTwo}, Queue{TopicID: id, RoomType: roomTypeThree})
+	}
+
+	waiting, err := s.store.CountWaiting(ctx, queues, now, s.waitTTL)
+	if err != nil {
+		return nil, err
+	}
+
+	statuses := make([]QueueStatus, len(queues))
+	for i, q := range queues {
+		statuses[i] = QueueStatus{Queue: q, Waiting: waiting[q] > 0}
+	}
+
+	s.statuses = statuses
+	s.statusExpiresAt = now.Add(s.statusTTL)
+	return slices.Clone(statuses), nil
 }
 
 // Join puts the user behind token in the queue q names and tries to form a
