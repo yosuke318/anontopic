@@ -24,7 +24,7 @@ const maxConsecutiveFailures = 5;
 // 画面の時計とサーバーの時計のずれと、状態を読む間隔のぶんを見込む。
 const expiryMarginMs = 30_000;
 
-// 待機の打ち切りまでの時間が読めないときに案内する分数。サーバーの既定の待機時間と同じ。
+// 待機の打ち切りまでの時間が読めないときに案内する分数。
 const defaultWaitMinutes = 10;
 
 const copy = {

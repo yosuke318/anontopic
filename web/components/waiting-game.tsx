@@ -184,6 +184,7 @@ export function WaitingGame({ stats }: { stats: RefObject<WaitingGameStats> }) {
       if (current === "paused") {
         lastFrame = null;
         enter("running");
+        run();
         return;
       }
       if (current === "running") {
@@ -198,6 +199,7 @@ export function WaitingGame({ stats }: { stats: RefObject<WaitingGameStats> }) {
       stats.current.started = true;
       stats.current.current = 0;
       enter("running");
+      run();
     }
 
     function crash() {
@@ -332,14 +334,24 @@ export function WaitingGame({ stats }: { stats: RefObject<WaitingGameStats> }) {
       }
     }
 
+    // 遊んでいない間は絵が変わらないため、フレームを回すのは遊んでいる間だけにする。
+    // 止まっている間の絵は、止まった回の最後のフレームか、大きさが変わったときに描き直したもの。
     function loop(now: number) {
-      frame = requestAnimationFrame(loop);
-      if (current === "running") {
-        const dt = lastFrame === null ? 0 : Math.min((now - lastFrame) / 1000, 0.05);
-        lastFrame = now;
-        step(dt);
+      if (current !== "running") {
+        frame = 0;
+        return;
       }
+      const dt = lastFrame === null ? 0 : Math.min((now - lastFrame) / 1000, 0.05);
+      lastFrame = now;
+      step(dt);
       draw();
+      frame = current === "running" ? requestAnimationFrame(loop) : 0;
+    }
+
+    function run() {
+      if (frame === 0) {
+        frame = requestAnimationFrame(loop);
+      }
     }
 
     function resize() {
@@ -405,7 +417,6 @@ export function WaitingGame({ stats }: { stats: RefObject<WaitingGameStats> }) {
     const observer = new ResizeObserver(resize);
     observer.observe(canvas);
     resize();
-    frame = requestAnimationFrame(loop);
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("keyup", handleKeyUp);
     document.addEventListener("visibilitychange", handleVisibilityChange);

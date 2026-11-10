@@ -72,6 +72,19 @@ const (
 	presenceDisconnected = "0"
 )
 
+// recordDistanceScript keeps the first waiting distance of a participant and
+// extends the lifetime of the hash only when it kept one, so that a
+// participant sending the same report on every reconnection does not keep the
+// hash alive past distanceTTL after the last distance was written. Both steps
+// run in one script, so a hash is never left without a lifetime.
+var recordDistanceScript = redis.NewScript(`
+local kept = redis.call('HSETNX', KEYS[1], ARGV[1], ARGV[2])
+if kept == 1 then
+	redis.call('EXPIRE', KEYS[1], ARGV[3])
+end
+return kept
+`)
+
 // RedisStore carries room events over Redis Pub/Sub and keeps the
 // participants connected to a room in Redis, where every server reads the
 // same ones. Every timestamp it writes is in milliseconds.
@@ -206,15 +219,13 @@ func (s *redisSubscription) Close() error {
 // conversation, whose fields are the participants' numbers. HSETNX keeps the
 // first value, so a participant cannot change what the room was told.
 func (s *RedisStore) RecordDistance(ctx context.Context, conversationID string, participant, distance int) (bool, error) {
-	key := distanceKey(conversationID)
-
-	pipe := s.client.TxPipeline()
-	kept := pipe.HSetNX(ctx, key, strconv.Itoa(participant), distance)
-	pipe.Expire(ctx, key, distanceTTL)
-	if _, err := pipe.Exec(ctx); err != nil {
+	kept, err := recordDistanceScript.Run(ctx, s.client,
+		[]string{distanceKey(conversationID)},
+		strconv.Itoa(participant), distance, int64(distanceTTL/time.Second)).Int()
+	if err != nil {
 		return false, fmt.Errorf("record waiting distance: %w", err)
 	}
-	return kept.Val(), nil
+	return kept == 1, nil
 }
 
 // Distances reads every waiting distance kept for a conversation.
