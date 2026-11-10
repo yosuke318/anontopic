@@ -10,6 +10,8 @@ export type MatchingState = {
   topic_id: number;
   room_type: RoomType;
   waiting_since?: string;
+  // waiting_untilは待機が打ち切られる時刻。待機中だけ入る。
+  waiting_until?: string;
   conversation?: {
     id: string;
     started_at: string;

@@ -26,10 +26,20 @@ export type RoomConversation = {
   startedAt: string;
 };
 
-// RoomEventはサーバーから届くフレーム。クライアントが送るのはメッセージだけで、
-// その形はclientFrameにある。
+// ParticipantDistanceは、ある参加者が待機中のゲームで進んだ距離。
+export type ParticipantDistance = { participant: number; distance: number };
+
+// RoomEventはサーバーから届くフレーム。クライアントが送るフレームの形はclientFrameと
+// distanceFrameにある。
 export type RoomEvent =
-  | { type: "joined"; conversation: RoomConversation; participant: number; present: number[] }
+  | {
+      type: "joined";
+      conversation: RoomConversation;
+      participant: number;
+      present: number[];
+      distances: ParticipantDistance[];
+    }
+  | { type: "waiting_distance"; participant: number; distance: number }
   | { type: "participant_joined"; participant: number; present: number[] }
   | { type: "participant_left"; participant: number; present: number[] }
   | { type: "message"; participant: number; body: string; sentAt: string }
@@ -51,6 +61,12 @@ export function clientFrame(body: string): string {
   return JSON.stringify({ type: "message", body });
 }
 
+// distanceFrameは待機中に進んだ距離を部屋に伝えるフレームを組み立てる。サーバーは
+// 参加者ごとに最初の1回だけを部屋に伝え、受け取れない値には何も返さない。
+export function distanceFrame(distance: number): string {
+  return JSON.stringify({ type: "waiting_distance", distance: Math.floor(distance) });
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -66,6 +82,29 @@ function presentOf(frame: Record<string, unknown>): number[] {
     return [];
   }
   return value.filter((number): number is number => typeof number === "number");
+}
+
+function distanceOf(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
+}
+
+function distancesOf(frame: Record<string, unknown>): ParticipantDistance[] {
+  const value = frame.distances;
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const distances: ParticipantDistance[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) {
+      continue;
+    }
+    const participant = participantOf(item);
+    const distance = distanceOf(item.distance);
+    if (participant !== null && distance !== null) {
+      distances.push({ participant, distance });
+    }
+  }
+  return distances;
 }
 
 function conversationOf(frame: Record<string, unknown>): RoomConversation | null {
@@ -107,7 +146,21 @@ export function parseRoomEvent(data: string): RoomEvent | null {
       if (conversation === null || participant === null) {
         return null;
       }
-      return { type: "joined", conversation, participant, present: presentOf(frame) };
+      return {
+        type: "joined",
+        conversation,
+        participant,
+        present: presentOf(frame),
+        distances: distancesOf(frame),
+      };
+    }
+    case "waiting_distance": {
+      const participant = participantOf(frame);
+      const distance = distanceOf(frame.distance);
+      if (participant === null || distance === null) {
+        return null;
+      }
+      return { type: "waiting_distance", participant, distance };
     }
     case "participant_joined":
     case "participant_left": {

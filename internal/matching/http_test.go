@@ -256,3 +256,20 @@ func TestQueuesEndpointAnswersWithoutASession(t *testing.T) {
 		t.Fatalf("body = %s, want no count", rec.Body.String())
 	}
 }
+
+func TestAWaitTellsTheClientWhenItIsGivenUpOn(t *testing.T) {
+	svc, _ := newTestService(t, newFakeStore(), newFakeRepository())
+	mux := newTestMux(t, svc)
+
+	rec := do(mux, http.MethodPost, "/api/matching", "alice", `{"topic_id":1,"room_type":2}`)
+	body := decodeBody[stateResponse](t, rec)
+	if body.WaitingSince == nil || body.WaitingUntil == nil {
+		t.Fatalf("body = %+v, want the start and the end of the wait", body)
+	}
+	if got := body.WaitingUntil.Sub(*body.WaitingSince); got != DefaultWaitTTL {
+		t.Fatalf("the wait lasts %s, want %s", got, DefaultWaitTTL)
+	}
+	if DefaultWaitTTL != 10*time.Minute {
+		t.Fatalf("DefaultWaitTTL = %s, want the 10 minutes the waiting screen promises", DefaultWaitTTL)
+	}
+}

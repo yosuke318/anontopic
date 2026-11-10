@@ -36,6 +36,8 @@ channels:
     messages:
       clientMessage:
         $ref: "#/components/messages/clientMessage"
+      clientWaitingDistance:
+        $ref: "#/components/messages/clientWaitingDistance"
       joined:
         $ref: "#/components/messages/joined"
       participantJoined:
@@ -44,6 +46,8 @@ channels:
         $ref: "#/components/messages/participantLeft"
       message:
         $ref: "#/components/messages/message"
+      waitingDistance:
+        $ref: "#/components/messages/waitingDistance"
       ended:
         $ref: "#/components/messages/ended"
       warning:
@@ -58,7 +62,8 @@ operations:
       $ref: "#/channels/room"
     title: メッセージを受け取る
     description: |
-      クライアントが送れるフレームはこれだけ。本文は前後の空白を落としてから扱い、
+      クライアントが送るフレームは、メッセージと、待機中のゲームで進んだ距離の 2 種類。
+      距離は `receiveWaitingDistance` を参照。メッセージの本文は前後の空白を落としてから扱い、
       空になるもの（`empty_body`）と 2000 文字を超えるもの（`too_long`）は拒否する。
 
       送信レートを超えたフレームは本文を見ずに `rate_limited` で拒否する。上限と回復の
@@ -72,6 +77,23 @@ operations:
       `warning` を、一時停止か恒久停止なら `ended`（`reason: banned`）を送信者にだけ返す。
     messages:
       - $ref: "#/channels/room/messages/clientMessage"
+
+  receiveWaitingDistance:
+    action: receive
+    channel:
+      $ref: "#/channels/room"
+    title: 待機中に進んだ距離を受け取る
+    description: |
+      待機画面のゲームで進んだ距離。クライアントは部屋に入るたびに送る。参加者ごとに
+      最初の 1 回だけを残して部屋に `waiting_distance` で伝え、2 回目以降は何もしない。
+      1 つの接続から読むのは 1 回まで。
+
+      距離がない、負、1,000,000 を超えるフレームは、返事をせずに捨てる。返事を
+      `error` で送ると、クライアントはそれを送信中のメッセージへの返事と読むため。
+      距離はクライアントが申告した値で、サーバーは確かめない。理由は
+      [ADR-0050](adr/0050-share-the-distance-covered-while-waiting-through-the-room.md) にある。
+    messages:
+      - $ref: "#/channels/room/messages/clientWaitingDistance"
 
   sendRoomEvent:
     action: send
@@ -89,6 +111,7 @@ operations:
       - $ref: "#/channels/room/messages/participantJoined"
       - $ref: "#/channels/room/messages/participantLeft"
       - $ref: "#/channels/room/messages/message"
+      - $ref: "#/channels/room/messages/waitingDistance"
       - $ref: "#/channels/room/messages/ended"
       - $ref: "#/channels/room/messages/warning"
       - $ref: "#/channels/room/messages/error"
@@ -114,6 +137,20 @@ components:
             examples:
               - はじめまして
 
+    clientWaitingDistance:
+      name: waiting_distance
+      title: 待機中に進んだ距離の送信
+      contentType: application/json
+      payload:
+        type: object
+        required: [type, distance]
+        properties:
+          type:
+            type: string
+            const: waiting_distance
+          distance:
+            $ref: "#/components/schemas/distance"
+
     joined:
       name: joined
       title: 入室の挨拶
@@ -132,6 +169,36 @@ components:
             $ref: "#/components/schemas/participant"
           present:
             $ref: "#/components/schemas/present"
+          distances:
+            type: array
+            description: |
+              すでに伝わっている待機中の距離を、参加者の番号の昇順に並べたもの。後から
+              入った参加者もこれで読める。誰も送っていなければ省かれる
+            items:
+              type: object
+              required: [participant, distance]
+              properties:
+                participant:
+                  $ref: "#/components/schemas/participant"
+                distance:
+                  $ref: "#/components/schemas/distance"
+
+    waitingDistance:
+      name: waiting_distance
+      title: 誰かの待機中の距離が伝わった
+      description: 送った本人にも届く。参加者ごとに 1 回だけ流れる。
+      contentType: application/json
+      payload:
+        type: object
+        required: [type, participant, distance]
+        properties:
+          type:
+            type: string
+            const: waiting_distance
+          participant:
+            $ref: "#/components/schemas/participant"
+          distance:
+            $ref: "#/components/schemas/distance"
 
     participantJoined:
       name: participant_joined
@@ -326,6 +393,14 @@ components:
       minimum: 1
       examples:
         - 1
+
+    distance:
+      type: integer
+      description: 待機画面のゲームで進んだ距離（メートル）。いちばん進んだ回の値
+      minimum: 0
+      maximum: 1000000
+      examples:
+        - 1234
 
     present:
       type: array

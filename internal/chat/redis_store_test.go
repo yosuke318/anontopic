@@ -47,7 +47,7 @@ func testConversationID(t *testing.T, store *RedisStore) string {
 	t.Helper()
 
 	id := fmt.Sprintf("%s-%d", t.Name(), rand.Int64())
-	t.Cleanup(func() { store.client.Del(context.Background(), presenceKey(id)) })
+	t.Cleanup(func() { store.client.Del(context.Background(), presenceKey(id), distanceKey(id)) })
 
 	return id
 }
@@ -233,5 +233,67 @@ func TestRedisStoreCountsTheParticipantsConnectedUnderEachTopic(t *testing.T) {
 	want = map[int]int{topicID: 1, otherTopicID: 0}
 	if !maps.Equal(counts, want) {
 		t.Fatalf("counts after ttl = %v, want %v", counts, want)
+	}
+}
+
+func TestRedisStoreKeepsTheFirstWaitingDistanceOfEachParticipant(t *testing.T) {
+	store := redisTestStore(t)
+	conversationID := testConversationID(t, store)
+	ctx := context.Background()
+
+	for _, report := range []struct {
+		participant, distance int
+		want                  bool
+	}{
+		{1, 1234, true},
+		{2, 0, true},
+		{1, 9999, false},
+	} {
+		kept, err := store.RecordDistance(ctx, conversationID, report.participant, report.distance)
+		if err != nil {
+			t.Fatalf("RecordDistance: %v", err)
+		}
+		if kept != report.want {
+			t.Fatalf("participant %d at %d kept = %t, want %t", report.participant, report.distance, kept, report.want)
+		}
+	}
+
+	distances, err := store.Distances(ctx, conversationID)
+	if err != nil {
+		t.Fatalf("Distances: %v", err)
+	}
+	if !maps.Equal(distances, map[int]int{1: 1234, 2: 0}) {
+		t.Fatalf("distances = %v, want the first report of each participant", distances)
+	}
+}
+
+func TestRedisStoreExtendsTheWaitingDistancesOnlyWhenItKeepsOne(t *testing.T) {
+	store := redisTestStore(t)
+	conversationID := testConversationID(t, store)
+	ctx := context.Background()
+	key := distanceKey(conversationID)
+
+	if _, err := store.RecordDistance(ctx, conversationID, 1, 100); err != nil {
+		t.Fatalf("RecordDistance: %v", err)
+	}
+	if ttl := store.client.TTL(ctx, key).Val(); ttl <= distanceTTL-time.Minute {
+		t.Fatalf("ttl = %s, want about %s once a distance is kept", ttl, distanceTTL)
+	}
+
+	// A report the hash already holds, such as the one a reconnection sends,
+	// leaves the lifetime where it was.
+	store.client.Expire(ctx, key, time.Minute)
+	if _, err := store.RecordDistance(ctx, conversationID, 1, 100); err != nil {
+		t.Fatalf("RecordDistance: %v", err)
+	}
+	if ttl := store.client.TTL(ctx, key).Val(); ttl > time.Minute {
+		t.Fatalf("ttl = %s, want it left at a minute", ttl)
+	}
+
+	if _, err := store.RecordDistance(ctx, conversationID, 2, 50); err != nil {
+		t.Fatalf("RecordDistance: %v", err)
+	}
+	if ttl := store.client.TTL(ctx, key).Val(); ttl <= distanceTTL-time.Minute {
+		t.Fatalf("ttl = %s, want it extended by the distance kept", ttl)
 	}
 }

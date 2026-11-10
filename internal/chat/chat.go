@@ -73,6 +73,12 @@ const (
 	// limit the same whatever script the message is written in.
 	maxMessageRunes = 2000
 
+	// maxWaitingDistance caps the waiting distance a participant reports. The
+	// game covers at most a few dozen metres a second, which over the longest
+	// wait comes to a few tens of thousands, so anything larger did not come
+	// from the game.
+	maxWaitingDistance = 1_000_000
+
 	// maxFrameBytes caps a frame read from a client. A body of
 	// maxMessageRunes fits even when every rune takes four bytes.
 	maxFrameBytes = 16 << 10
@@ -453,6 +459,7 @@ func (s *Service) Serve(ctx context.Context, ws *websocket.Conn, adm Admission) 
 		},
 		Participant: adm.Participant,
 		Present:     present,
+		Distances:   s.distancesOf(ctx, adm.Conversation.ID),
 	})
 	s.publish(ctx, adm.Conversation.ID, serverEvent{
 		Type:        eventParticipantJoined,
@@ -533,9 +540,62 @@ func (s *Service) handleFrame(ctx context.Context, c *conn, data []byte) {
 	switch frame.Type {
 	case frameMessage:
 		s.sendMessage(ctx, c, frame.Body)
+	case frameWaitingDistance:
+		s.recordDistance(ctx, c, frame.Distance)
 	default:
 		c.send(errorEvent(codeInvalidFrame, "unknown frame type"))
 	}
+}
+
+// distancesOf reads the waiting distances the participants of a conversation
+// reported, in the order of their numbers. The room is entered without them
+// when they cannot be read, because nothing else in the room depends on them.
+func (s *Service) distancesOf(ctx context.Context, conversationID string) []participantDistance {
+	kept, err := s.store.Distances(ctx, conversationID)
+	if err != nil {
+		slog.Error("read waiting distances",
+			slog.String("conversation_id", conversationID), slog.Any("error", err))
+		return nil
+	}
+
+	distances := make([]participantDistance, 0, len(kept))
+	for participant, distance := range kept {
+		distances = append(distances, participantDistance{Participant: participant, Distance: distance})
+	}
+	slices.SortFunc(distances, func(a, b participantDistance) int { return a.Participant - b.Participant })
+	return distances
+}
+
+// recordDistance keeps the waiting distance a participant reported and tells
+// the room, once per participant. A connection is read for one report at
+// most, and a report that cannot be taken is dropped without an answer: the
+// client sends it on its own when it enters the room, and an error there
+// would be read as the answer to a message the participant sent.
+func (s *Service) recordDistance(ctx context.Context, c *conn, distance *int) {
+	if c.distanceTaken {
+		return
+	}
+	c.distanceTaken = true
+
+	if distance == nil || *distance < 0 || *distance > maxWaitingDistance {
+		return
+	}
+
+	kept, err := s.store.RecordDistance(ctx, c.conversationID, c.participant, *distance)
+	if err != nil {
+		slog.Error("record waiting distance",
+			slog.String("conversation_id", c.conversationID), slog.Any("error", err))
+		return
+	}
+	if !kept {
+		return
+	}
+
+	s.publish(ctx, c.conversationID, serverEvent{
+		Type:        eventWaitingDistance,
+		Participant: c.participant,
+		Distance:    distance,
+	})
 }
 
 // sendMessage moderates one message, records it, and hands it to the room,

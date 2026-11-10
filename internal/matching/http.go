@@ -51,6 +51,7 @@ type stateResponse struct {
 	TopicID      int        `json:"topic_id"`
 	RoomType     int        `json:"room_type"`
 	WaitingSince *time.Time `json:"waiting_since,omitempty"`
+	WaitingUntil *time.Time `json:"waiting_until,omitempty"`
 	Conversation *room      `json:"conversation,omitempty"`
 }
 
@@ -195,6 +196,7 @@ func newStateResponse(state State) stateResponse {
 	}
 
 	body.WaitingSince = &state.WaitingSince
+	body.WaitingUntil = &state.WaitingUntil
 	return body
 }
 

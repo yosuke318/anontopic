@@ -14,6 +14,12 @@ const (
 	roomChannelPrefix      = "chat:room:"
 	presenceKeyPrefix      = "chat:presence:"
 	topicPresenceKeyPrefix = "chat:topic-presence:"
+	distanceKeyPrefix      = "chat:waiting-distance:"
+
+	// distanceTTL is how long the waiting distances of a conversation are
+	// kept after the last one was written. It outlasts any conversation a
+	// participant can still come back to.
+	distanceTTL = 24 * time.Hour
 
 	// subscriptionBuffer is how many events one room's subscription holds
 	// while its connections are being written to.
@@ -65,6 +71,19 @@ const (
 	presenceConnected    = "1"
 	presenceDisconnected = "0"
 )
+
+// recordDistanceScript keeps the first waiting distance of a participant and
+// extends the lifetime of the hash only when it kept one, so that a
+// participant sending the same report on every reconnection does not keep the
+// hash alive past distanceTTL after the last distance was written. Both steps
+// run in one script, so a hash is never left without a lifetime.
+var recordDistanceScript = redis.NewScript(`
+local kept = redis.call('HSETNX', KEYS[1], ARGV[1], ARGV[2])
+if kept == 1 then
+	redis.call('EXPIRE', KEYS[1], ARGV[3])
+end
+return kept
+`)
 
 // RedisStore carries room events over Redis Pub/Sub and keeps the
 // participants connected to a room in Redis, where every server reads the
@@ -196,7 +215,44 @@ func (s *redisSubscription) Close() error {
 	return nil
 }
 
+// RecordDistance keeps the waiting distance of one participant in a hash per
+// conversation, whose fields are the participants' numbers. HSETNX keeps the
+// first value, so a participant cannot change what the room was told.
+func (s *RedisStore) RecordDistance(ctx context.Context, conversationID string, participant, distance int) (bool, error) {
+	kept, err := recordDistanceScript.Run(ctx, s.client,
+		[]string{distanceKey(conversationID)},
+		strconv.Itoa(participant), distance, int64(distanceTTL/time.Second)).Int()
+	if err != nil {
+		return false, fmt.Errorf("record waiting distance: %w", err)
+	}
+	return kept == 1, nil
+}
+
+// Distances reads every waiting distance kept for a conversation.
+func (s *RedisStore) Distances(ctx context.Context, conversationID string) (map[int]int, error) {
+	fields, err := s.client.HGetAll(ctx, distanceKey(conversationID)).Result()
+	if err != nil {
+		return nil, fmt.Errorf("read waiting distances: %w", err)
+	}
+
+	distances := make(map[int]int, len(fields))
+	for field, value := range fields {
+		participant, err := strconv.Atoi(field)
+		if err != nil {
+			return nil, fmt.Errorf("parse the participant of a waiting distance: %w", err)
+		}
+		distance, err := strconv.Atoi(value)
+		if err != nil {
+			return nil, fmt.Errorf("parse a waiting distance: %w", err)
+		}
+		distances[participant] = distance
+	}
+	return distances, nil
+}
+
 func roomChannel(conversationID string) string { return roomChannelPrefix + conversationID }
+
+func distanceKey(conversationID string) string { return distanceKeyPrefix + conversationID }
 
 func presenceKey(conversationID string) string { return presenceKeyPrefix + conversationID }
 

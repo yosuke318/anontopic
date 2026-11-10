@@ -1568,8 +1568,8 @@ components:
     MatchingState:
       type: object
       description: |
-        待機の状態。`state` が `waiting` の間は `waiting_since` が、`matched` になると
-        `conversation` が入る。
+        待機の状態。`state` が `waiting` の間は `waiting_since` と `waiting_until` が、
+        `matched` になると `conversation` が入る。
       required: [state, topic_id, room_type]
       properties:
         state:
@@ -1595,6 +1595,15 @@ components:
           description: 待機を始めた時刻。`state` が `waiting` のときに入る
           examples:
             - "2026-08-27T07:13:01.562Z"
+        waiting_until:
+          type: string
+          format: date-time
+          description: |
+            待機が打ち切られる時刻。`waiting_since` に `MATCHING_WAIT_TTL`（既定 10 分）を
+            足したもので、`state` が `waiting` のときに入る。過ぎると待機は終わり、
+            `GET /api/matching` は 404 を返す
+          examples:
+            - "2026-08-27T07:23:01.562Z"
         conversation:
           type: object
           description: 参加する会話。`state` が `matched` のときに入る
