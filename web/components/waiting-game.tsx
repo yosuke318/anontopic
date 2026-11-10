@@ -314,9 +314,9 @@ export function WaitingGame({ stats }: { stats: RefObject<WaitingGameStats> }) {
       // 敵がいる間は、ふつうの障害物の間隔をのばす。青龍の雷の間は出さない。
       if (!enemy?.blocksObstacles) {
         spawnIn -= dt / (enemy?.spawnFactor ?? 1);
-      }
-      if (spawnIn <= 0) {
-        spawn();
+        if (spawnIn <= 0) {
+          spawn();
+        }
       }
 
       for (const obstacle of obstacles) {
