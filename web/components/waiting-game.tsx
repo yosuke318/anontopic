@@ -3,10 +3,33 @@
 import { type PointerEvent, type RefObject, useEffect, useRef, useState } from "react";
 
 import { formatDistance } from "@/lib/waiting-distance";
+import {
+  type Circle,
+  Enemy,
+  type EnemyKind,
+  type Rect,
+  appearanceWindow,
+  enemyNames,
+  planAppearances,
+  worldHeight,
+  worldWidth,
+} from "@/lib/waiting-game/enemies";
+import { drawEnemy, drawStrikes, labelColors } from "@/lib/waiting-game/sprites";
 
-// ゲームの中の座標。キャンバスの実際の大きさに合わせて拡大して描く。
-const worldWidth = 320;
-const worldHeight = 420;
+// 敵が現れたことを知らせる文字を出しておく秒数。
+const enemyLabelDuration = 2;
+
+// previewKindは開発中にだけ読む、?game-preview=<敵の名前>の値。遊び始めるとすぐその敵が現れ、
+// 自機は当たっても止まらない。本番のビルドでは読まない。
+function previewKind(): EnemyKind | null {
+  if (process.env.NODE_ENV !== "development") {
+    return null;
+  }
+  const value = new URLSearchParams(window.location.search).get("game-preview");
+  return value === "turtle" || value === "tiger" || value === "suzaku" || value === "dragon"
+    ? value
+    : null;
+}
 
 const playerRadius = 11;
 const playerBottomGap = 64;
@@ -111,20 +134,28 @@ function randomBetween(min: number, max: number): number {
   return min + Math.random() * (max - min);
 }
 
-// hitsは自機の円が障害物の四角に触れているかを返す。角の丸みのぶん、少しだけ甘く判定する。
-function hits(x: number, y: number, obstacle: Obstacle): boolean {
-  const nearestX = Math.min(Math.max(x, obstacle.x), obstacle.x + obstacle.width);
-  const nearestY = Math.min(Math.max(y, obstacle.y), obstacle.y + obstacle.height);
+// 当たり判定に使う自機の半径。角の丸みや絵のふちのぶん、少しだけ甘くする。
+const playerReach = playerRadius * 0.85;
+
+// hitsは自機の円が四角（障害物や縦に貫く攻撃）に触れているかを返す。
+function hits(x: number, y: number, rect: Rect): boolean {
+  const nearestX = Math.min(Math.max(x, rect.x), rect.x + rect.width);
+  const nearestY = Math.min(Math.max(y, rect.y), rect.y + rect.height);
   const dx = x - nearestX;
   const dy = y - nearestY;
-  const reach = playerRadius * 0.85;
-  return dx * dx + dy * dy < reach * reach;
+  return dx * dx + dy * dy < playerReach * playerReach;
+}
+
+// hitsCircleは自機の円が敵の体や弾の円に触れているかを返す。
+function hitsCircle(x: number, y: number, circle: Circle): boolean {
+  const reach = playerReach + circle.radius;
+  return (x - circle.x) ** 2 + (y - circle.y) ** 2 < reach * reach;
 }
 
 const overlayCopy = {
   idle: {
     title: "よけてあそぶ",
-    body: "画面をなぞると、なぞった向きに動きます。キーボードなら矢印キーか WASD。",
+    body: "画面をなぞると、なぞった向きに動きます。キーボードなら矢印キーか WASD。2 分を過ぎると、四神がひとりずつ現れます。",
     action: "あそぶ",
   },
   crashed: { title: "ぶつかった！", body: "", action: "もう一度" },
@@ -165,6 +196,9 @@ export function WaitingGame({ stats }: { stats: RefObject<WaitingGameStats> }) {
     let lastFrame: number | null = null;
     let frame = 0;
     let scale = 1;
+    let enemy: Enemy | null = null;
+    let appearances: { kind: EnemyKind; at: number }[] = [];
+    const preview = previewKind();
     const keys = new Set<string>();
     let pointer: { id: number; x: number; y: number } | null = null;
 
@@ -192,7 +226,13 @@ export function WaitingGame({ stats }: { stats: RefObject<WaitingGameStats> }) {
       }
       player = { x: worldWidth / 2, y: worldHeight - playerBottomGap };
       obstacles = [];
+      enemy = null;
+      appearances = planAppearances();
       elapsed = 0;
+      if (preview !== null) {
+        elapsed = appearanceWindow(preview).from;
+        appearances = [{ kind: preview, at: elapsed + 1 }];
+      }
       distance = 0;
       spawnIn = 0.6;
       lastFrame = null;
@@ -203,6 +243,9 @@ export function WaitingGame({ stats }: { stats: RefObject<WaitingGameStats> }) {
     }
 
     function crash() {
+      if (preview !== null) {
+        return;
+      }
       stats.current.crashed = true;
       stats.current.best = Math.max(stats.current.best, distance);
       stats.current.current = 0;
@@ -256,7 +299,22 @@ export function WaitingGame({ stats }: { stats: RefObject<WaitingGameStats> }) {
         clampPlayer();
       }
 
-      spawnIn -= dt;
+      // 敵は1体ずつ。前の敵が帰って、攻撃も消えてから次が現れる。
+      if (enemy === null && appearances.length > 0 && appearances[0].at <= elapsed) {
+        const next = appearances.shift();
+        if (next !== undefined) {
+          enemy = new Enemy(next.kind);
+        }
+      }
+      enemy?.update(dt, player);
+      if (enemy?.finished) {
+        enemy = null;
+      }
+
+      // 敵がいる間は、ふつうの障害物の間隔をのばす。青龍の雷の間は出さない。
+      if (!enemy?.blocksObstacles) {
+        spawnIn -= dt / (enemy?.spawnFactor ?? 1);
+      }
       if (spawnIn <= 0) {
         spawn();
       }
@@ -266,7 +324,12 @@ export function WaitingGame({ stats }: { stats: RefObject<WaitingGameStats> }) {
       }
       obstacles = obstacles.filter((obstacle) => obstacle.y < worldHeight + 10);
 
-      if (obstacles.some((obstacle) => hits(player.x, player.y, obstacle))) {
+      const hazards = enemy?.hazards();
+      if (
+        obstacles.some((obstacle) => hits(player.x, player.y, obstacle)) ||
+        hazards?.rects.some((rect) => hits(player.x, player.y, rect)) ||
+        hazards?.circles.some((circle) => hitsCircle(player.x, player.y, circle))
+      ) {
         crash();
       }
     }
@@ -300,6 +363,10 @@ export function WaitingGame({ stats }: { stats: RefObject<WaitingGameStats> }) {
       }
       context.setLineDash([]);
 
+      if (enemy !== null) {
+        drawStrikes(context, enemy);
+      }
+
       for (const obstacle of obstacles) {
         context.fillStyle = palette.obstacles[obstacle.tone];
         context.strokeStyle = palette.obstacleEdges[obstacle.tone];
@@ -307,6 +374,10 @@ export function WaitingGame({ stats }: { stats: RefObject<WaitingGameStats> }) {
         roundedRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height, 7);
         context.fill();
         context.stroke();
+      }
+
+      if (enemy !== null) {
+        drawEnemy(context, enemy);
       }
 
       context.fillStyle = palette.brand;
@@ -331,6 +402,16 @@ export function WaitingGame({ stats }: { stats: RefObject<WaitingGameStats> }) {
         context.font = `500 12px ${palette.font}`;
         context.textAlign = "right";
         context.fillText(`ベスト ${formatDistance(stats.current.best)}`, worldWidth - 14, 14);
+      }
+
+      if (enemy !== null && enemy.age < enemyLabelDuration) {
+        context.save();
+        context.globalAlpha = Math.min(1, (enemyLabelDuration - enemy.age) * 2);
+        context.fillStyle = labelColors[enemy.kind];
+        context.font = `700 15px ${palette.font}`;
+        context.textAlign = "center";
+        context.fillText(`${enemyNames[enemy.kind]}があらわれた！`, worldWidth / 2, 96);
+        context.restore();
       }
     }
 
