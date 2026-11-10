@@ -4,6 +4,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 
 import {
   clientFrame,
+  distanceFrame,
   parseRoomEvent,
   roomSocketUrl,
   type BlockReason,
@@ -11,6 +12,7 @@ import {
   type RoomErrorCode,
   type RoomEvent,
 } from "@/lib/room";
+import { loadWaitingDistance } from "@/lib/waiting-distance";
 
 // 接続が切れてから次に試すまでの待ち時間。試すたびに倍にして、この値で頭打ちにする。
 const reconnectBaseDelayMs = 500;
@@ -40,6 +42,8 @@ type Identified = { id: string };
 
 type MessageItem = { kind: "message"; participant: number; body: string; sentAt: string };
 type PresenceItem = { kind: "presence"; participant: number; event: "joined" | "left" };
+// DistanceItemは、ある参加者が待機中のゲームで進んだ距離。
+type DistanceItem = { kind: "distance"; participant: number; distance: number };
 type NoticeItem = { kind: "notice"; notice: NoticeKind };
 type OutgoingItem = {
   kind: "outgoing";
@@ -50,11 +54,12 @@ type OutgoingItem = {
   blockReason: BlockReason | null;
 };
 
-type NewItem = MessageItem | PresenceItem | NoticeItem | OutgoingItem;
+type NewItem = MessageItem | PresenceItem | DistanceItem | NoticeItem | OutgoingItem;
 
 export type TimelineItem =
   | (MessageItem & Identified)
   | (PresenceItem & Identified)
+  | (DistanceItem & Identified)
   | (NoticeItem & Identified)
   | (OutgoingItem & Identified);
 
@@ -63,6 +68,8 @@ type RoomState = {
   conversation: RoomConversation | null;
   self: number | null;
   present: number[];
+  // distancesは部屋に伝わった待機中の距離を、参加者の番号ごとに持つ。
+  distances: Record<number, number>;
   endReason: string | null;
   timeline: TimelineItem[];
   nextId: number;
@@ -73,6 +80,7 @@ const initialState: RoomState = {
   conversation: null,
   self: null,
   present: [],
+  distances: {},
   endReason: null,
   timeline: [],
   nextId: 1,
@@ -136,15 +144,32 @@ function failSending(
   };
 }
 
+// addDistanceは伝わった距離を流れに足す。つなぎ直すとjoinedが同じ距離をもう一度
+// 届けるため、すでに受け取った参加者の距離は足さない。
+function addDistance(state: RoomState, participant: number, distance: number): RoomState {
+  if (participant in state.distances) {
+    return state;
+  }
+  return append(
+    { ...state, distances: { ...state.distances, [participant]: distance } },
+    { kind: "distance", participant, distance },
+  );
+}
+
 function applyEvent(state: RoomState, event: RoomEvent): RoomState {
   switch (event.type) {
     case "joined":
-      return {
-        ...state,
-        conversation: event.conversation,
-        self: event.participant,
-        present: event.present,
-      };
+      return event.distances.reduce<RoomState>(
+        (next, { participant, distance }) => addDistance(next, participant, distance),
+        {
+          ...state,
+          conversation: event.conversation,
+          self: event.participant,
+          present: event.present,
+        },
+      );
+    case "waiting_distance":
+      return addDistance(state, event.participant, event.distance);
     case "participant_joined":
     case "participant_left": {
       const next = { ...state, present: event.present };
@@ -290,6 +315,18 @@ export function useRoomSocket(conversationId: string): RoomSocket {
           endedRef.current = true;
         }
         dispatch({ type: "event", event });
+        // 待機中に進んだ距離は、部屋に入るたびに送る。サーバーは参加者ごとに最初の1回
+        // だけを部屋に伝えるため、つなぎ直して送り直しても重ならない。
+        if (event.type === "joined") {
+          const distance = loadWaitingDistance(conversationId);
+          if (distance !== null) {
+            try {
+              socket.send(distanceFrame(distance));
+            } catch {
+              // 送れなくても会話は続けられる。
+            }
+          }
+        }
       };
 
       socket.onclose = () => {

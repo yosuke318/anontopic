@@ -2,14 +2,24 @@ package chat
 
 import "time"
 
-// frameMessage is the type of the only frame a client sends: one message for
-// the room.
-const frameMessage = "message"
+// The types of the frames a client sends.
+const (
+	// frameMessage is one message for the room.
+	frameMessage = "message"
+	// frameWaitingDistance is the distance the participant covered in the
+	// game shown while they waited to be matched. The room is told the first
+	// one each participant sends; the reasoning is in
+	// docs/adr/0050-share-the-distance-covered-while-waiting-through-the-room.md.
+	frameWaitingDistance = "waiting_distance"
+)
 
 // clientFrame is what a client sends over its connection.
 type clientFrame struct {
 	Type string `json:"type"`
+	// Body is set on frameMessage.
 	Body string `json:"body"`
+	// Distance is set on frameWaitingDistance.
+	Distance *int `json:"distance"`
 }
 
 // The types of the events the server sends over a connection.
@@ -23,6 +33,9 @@ const (
 	eventParticipantLeft   = "participant_left"
 	// eventMessage carries one message to the room, its sender included.
 	eventMessage = "message"
+	// eventWaitingDistance tells the room the distance one participant
+	// covered while waiting, the participant included.
+	eventWaitingDistance = "waiting_distance"
 	// eventEnded is the last event of a conversation. It reaches a single
 	// connection when its participant was banned, and ends the conversation
 	// for that participant alone.
@@ -60,6 +73,13 @@ type serverEvent struct {
 	// Body and SentAt are set on eventMessage.
 	Body   string     `json:"body,omitempty"`
 	SentAt *time.Time `json:"sent_at,omitempty"`
+	// Distance is set on eventWaitingDistance. Zero is a distance, so it is
+	// written whenever it is set.
+	Distance *int `json:"distance,omitempty"`
+	// Distances holds the waiting distance of every participant who reported
+	// one, in the order of their numbers. It is set on eventJoined, so that a
+	// participant who arrives later reads what the others reported before.
+	Distances []participantDistance `json:"distances,omitempty"`
 	// Reason is set on eventEnded, where it holds a value of
 	// conversations.end_reason or endReasonBanned, and on eventError of
 	// codeBlocked, where it holds what the Moderator said the message was
@@ -68,6 +88,12 @@ type serverEvent struct {
 	// Code and Message are set on eventError.
 	Code    string `json:"code,omitempty"`
 	Message string `json:"message,omitempty"`
+}
+
+// participantDistance is the waiting distance of one participant.
+type participantDistance struct {
+	Participant int `json:"participant"`
+	Distance    int `json:"distance"`
 }
 
 // conversationInfo is the room a connection was admitted to.

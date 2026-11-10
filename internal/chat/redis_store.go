@@ -14,6 +14,12 @@ const (
 	roomChannelPrefix      = "chat:room:"
 	presenceKeyPrefix      = "chat:presence:"
 	topicPresenceKeyPrefix = "chat:topic-presence:"
+	distanceKeyPrefix      = "chat:waiting-distance:"
+
+	// distanceTTL is how long the waiting distances of a conversation are
+	// kept after the last one was written. It outlasts any conversation a
+	// participant can still come back to.
+	distanceTTL = 24 * time.Hour
 
 	// subscriptionBuffer is how many events one room's subscription holds
 	// while its connections are being written to.
@@ -196,7 +202,46 @@ func (s *redisSubscription) Close() error {
 	return nil
 }
 
+// RecordDistance keeps the waiting distance of one participant in a hash per
+// conversation, whose fields are the participants' numbers. HSETNX keeps the
+// first value, so a participant cannot change what the room was told.
+func (s *RedisStore) RecordDistance(ctx context.Context, conversationID string, participant, distance int) (bool, error) {
+	key := distanceKey(conversationID)
+
+	pipe := s.client.TxPipeline()
+	kept := pipe.HSetNX(ctx, key, strconv.Itoa(participant), distance)
+	pipe.Expire(ctx, key, distanceTTL)
+	if _, err := pipe.Exec(ctx); err != nil {
+		return false, fmt.Errorf("record waiting distance: %w", err)
+	}
+	return kept.Val(), nil
+}
+
+// Distances reads every waiting distance kept for a conversation.
+func (s *RedisStore) Distances(ctx context.Context, conversationID string) (map[int]int, error) {
+	fields, err := s.client.HGetAll(ctx, distanceKey(conversationID)).Result()
+	if err != nil {
+		return nil, fmt.Errorf("read waiting distances: %w", err)
+	}
+
+	distances := make(map[int]int, len(fields))
+	for field, value := range fields {
+		participant, err := strconv.Atoi(field)
+		if err != nil {
+			return nil, fmt.Errorf("parse the participant of a waiting distance: %w", err)
+		}
+		distance, err := strconv.Atoi(value)
+		if err != nil {
+			return nil, fmt.Errorf("parse a waiting distance: %w", err)
+		}
+		distances[participant] = distance
+	}
+	return distances, nil
+}
+
 func roomChannel(conversationID string) string { return roomChannelPrefix + conversationID }
+
+func distanceKey(conversationID string) string { return distanceKeyPrefix + conversationID }
 
 func presenceKey(conversationID string) string { return presenceKeyPrefix + conversationID }
 

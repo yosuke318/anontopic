@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -143,14 +144,40 @@ type fakeStore struct {
 	presence map[string]map[string]time.Time
 	// topics holds the topic each conversation was recorded under.
 	topics map[string]int
+	// distances holds the waiting distances of each conversation.
+	distances map[string]map[int]int
 }
 
 func newFakeStore() *fakeStore {
 	return &fakeStore{
-		subs:     make(map[string][]*fakeSubscription),
-		presence: make(map[string]map[string]time.Time),
-		topics:   make(map[string]int),
+		subs:      make(map[string][]*fakeSubscription),
+		presence:  make(map[string]map[string]time.Time),
+		topics:    make(map[string]int),
+		distances: make(map[string]map[int]int),
 	}
+}
+
+func (s *fakeStore) RecordDistance(_ context.Context, conversationID string, participant, distance int) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	room := s.distances[conversationID]
+	if room == nil {
+		room = make(map[int]int)
+		s.distances[conversationID] = room
+	}
+	if _, ok := room[participant]; ok {
+		return false, nil
+	}
+	room[participant] = distance
+	return true, nil
+}
+
+func (s *fakeStore) Distances(_ context.Context, conversationID string) (map[int]int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return maps.Clone(s.distances[conversationID]), nil
 }
 
 func (s *fakeStore) Publish(_ context.Context, conversationID string, payload []byte) error {

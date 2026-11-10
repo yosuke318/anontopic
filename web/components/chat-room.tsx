@@ -15,6 +15,7 @@ import { ReportDialog } from "@/components/report-dialog";
 import { joinQueue, leaveQueue, type RoomType } from "@/lib/matching";
 import { type BlockReason, messageMaxLength, participantIndex, participantLabel } from "@/lib/room";
 import type { Topic } from "@/lib/topics";
+import { formatDistance } from "@/lib/waiting-distance";
 import {
   useRoomSocket,
   type NoticeKind,
@@ -391,6 +392,15 @@ export function ChatRoom({ conversationId, topics }: { conversationId: string; t
         <Line key={item.id}>
           {item.event === "joined" ? `${label}が入室しました` : `${label}が退出しました`}
         </Line>
+      );
+    }
+
+    if (item.kind === "distance") {
+      const label = participantLabel(item.participant, room.self, roomType);
+      return (
+        <Line
+          key={item.id}
+        >{`${label}は待っている間に ${formatDistance(item.distance)} 進みました`}</Line>
       );
     }
 

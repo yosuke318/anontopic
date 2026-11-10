@@ -47,7 +47,7 @@ func testConversationID(t *testing.T, store *RedisStore) string {
 	t.Helper()
 
 	id := fmt.Sprintf("%s-%d", t.Name(), rand.Int64())
-	t.Cleanup(func() { store.client.Del(context.Background(), presenceKey(id)) })
+	t.Cleanup(func() { store.client.Del(context.Background(), presenceKey(id), distanceKey(id)) })
 
 	return id
 }
@@ -233,5 +233,36 @@ func TestRedisStoreCountsTheParticipantsConnectedUnderEachTopic(t *testing.T) {
 	want = map[int]int{topicID: 1, otherTopicID: 0}
 	if !maps.Equal(counts, want) {
 		t.Fatalf("counts after ttl = %v, want %v", counts, want)
+	}
+}
+
+func TestRedisStoreKeepsTheFirstWaitingDistanceOfEachParticipant(t *testing.T) {
+	store := redisTestStore(t)
+	conversationID := testConversationID(t, store)
+	ctx := context.Background()
+
+	for _, report := range []struct {
+		participant, distance int
+		want                  bool
+	}{
+		{1, 1234, true},
+		{2, 0, true},
+		{1, 9999, false},
+	} {
+		kept, err := store.RecordDistance(ctx, conversationID, report.participant, report.distance)
+		if err != nil {
+			t.Fatalf("RecordDistance: %v", err)
+		}
+		if kept != report.want {
+			t.Fatalf("participant %d at %d kept = %t, want %t", report.participant, report.distance, kept, report.want)
+		}
+	}
+
+	distances, err := store.Distances(ctx, conversationID)
+	if err != nil {
+		t.Fatalf("Distances: %v", err)
+	}
+	if !maps.Equal(distances, map[int]int{1: 1234, 2: 0}) {
+		t.Fatalf("distances = %v, want the first report of each participant", distances)
 	}
 }

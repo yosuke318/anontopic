@@ -307,7 +307,7 @@ APIサーバーの設定は環境変数で行う。
 | `SESSION_IP_HASH_SECRET` | プロセス起動ごとの乱数 | IPハッシュの鍵。未設定だと再起動でハッシュが変わり、ハッシュに紐づくBANが外れる |
 | `ADMIN_API_TOKEN` | なし | 管理API（`/api/admin/*`）が要求するBearerトークン。未設定だと管理エンドポイントを登録しない |
 | `TOPIC_CACHE_TTL` | `5m` | トピック一覧をプロセス内に保持する時間。`300s` のようなGoのduration表記 |
-| `MATCHING_WAIT_TTL` | `5m` | 待機キューに並び続けられる時間。超えた利用者はキューから外れる |
+| `MATCHING_WAIT_TTL` | `10m` | 待機キューに並び続けられる時間。超えた利用者はキューから外れる。待機画面はこの時間を案内し、残り時間を数える |
 | `MATCHING_FALLBACK_AFTER` | `60s` | 3人ルームの待機がこの時間を超えたら2人で成立させる |
 | `MATCHING_STATUS_TTL` | `5s` | キューごとの待ちの有無（`GET /api/matching/queues`）をプロセス内で使い回す時間 |
 | `CHAT_REJOIN_GRACE` | `30s` | 切断した参加者を待つ時間。接続中が1人以下のままこの時間を超えると会話を終了する |

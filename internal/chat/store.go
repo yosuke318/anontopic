@@ -41,6 +41,15 @@ type Store interface {
 	// is counted for ttl, the same lifetime a room counts it for. A topic
 	// nobody is connected to answers zero.
 	CountConnected(ctx context.Context, topicIDs []int, now time.Time, ttl time.Duration) (map[int]int, error)
+
+	// RecordDistance keeps distance as the waiting distance of participant in
+	// the conversation, unless one is kept for them already, and reports
+	// whether it kept this one.
+	RecordDistance(ctx context.Context, conversationID string, participant, distance int) (bool, error)
+
+	// Distances returns the waiting distance kept for each participant of the
+	// conversation, keyed by the participant's number.
+	Distances(ctx context.Context, conversationID string) (map[int]int, error)
 }
 
 // Seat is the place one participant's connection takes: the conversation and

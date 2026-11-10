@@ -28,8 +28,10 @@ import (
 
 const (
 	// DefaultWaitTTL is how long a user waits in a queue before the wait is
-	// given up on.
-	DefaultWaitTTL = 5 * time.Minute
+	// given up on. The waiting screen tells the user this limit and counts
+	// down to it; the reasoning is in
+	// docs/adr/0050-share-the-distance-covered-while-waiting-through-the-room.md.
+	DefaultWaitTTL = 10 * time.Minute
 
 	// DefaultFallbackAfter is how long two users wait for a third before they
 	// are given a room of two.
@@ -127,6 +129,9 @@ type State struct {
 	// WaitingSince is when the user entered the queue. It is set for
 	// StateWaiting.
 	WaitingSince time.Time
+	// WaitingUntil is when the wait is given up on, WaitTTL after
+	// WaitingSince. It is set for StateWaiting.
+	WaitingUntil time.Time
 	// Conversation is set for StateMatched.
 	Conversation Conversation
 }
@@ -415,6 +420,9 @@ func (s *Service) State(ctx context.Context, token string) (State, error) {
 	state, err = s.store.Lookup(ctx, token)
 	if err != nil {
 		return State{}, fmt.Errorf("look up state: %w", err)
+	}
+	if state.Kind == StateWaiting {
+		state.WaitingUntil = state.WaitingSince.Add(s.waitTTL)
 	}
 	return state, nil
 }

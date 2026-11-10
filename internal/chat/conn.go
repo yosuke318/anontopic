@@ -28,6 +28,10 @@ type conn struct {
 	// the meantime is taken.
 	banned atomic.Bool
 
+	// distanceTaken is set once the connection sent a waiting distance. It is
+	// only touched by the goroutine reading the connection.
+	distanceTaken bool
+
 	out       chan outgoing
 	done      chan struct{}
 	closeOnce sync.Once
