@@ -29,9 +29,10 @@ import (
 const (
 	// DefaultWaitTTL is how long a user waits in a queue before the wait is
 	// given up on. The waiting screen tells the user this limit and counts
-	// down to it; the reasoning is in
-	// docs/adr/0050-share-the-distance-covered-while-waiting-through-the-room.md.
-	DefaultWaitTTL = 10 * time.Minute
+	// down to it. It is long enough for two laps of the game shown while
+	// waiting; the reasoning is in
+	// docs/adr/0051-wait-21-minutes-so-the-waiting-game-runs-two-laps.md.
+	DefaultWaitTTL = 21 * time.Minute
 
 	// DefaultFallbackAfter is how long two users wait for a third before they
 	// are given a room of two.

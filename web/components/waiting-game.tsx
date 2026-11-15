@@ -1,32 +1,50 @@
 "use client";
 
-import { type PointerEvent, type RefObject, useEffect, useRef, useState } from "react";
+import { type PointerEvent, type RefObject, useEffect, useId, useRef, useState } from "react";
 
 import { formatDistance } from "@/lib/waiting-distance";
 import {
+  type Appearance,
   type Circle,
   Enemy,
   type EnemyKind,
   type Rect,
   appearanceWindow,
   enemyNames,
+  lapDuration,
   planAppearances,
   worldHeight,
   worldWidth,
 } from "@/lib/waiting-game/enemies";
 import { drawEnemy, drawStrikes, labelColors } from "@/lib/waiting-game/sprites";
 
-// 敵が現れたことを知らせる文字を出しておく秒数。
+// 敵が現れたことと、次の周に入ったことを知らせる文字を出しておく秒数。
 const enemyLabelDuration = 2;
+const lapLabelDuration = 2.5;
+
+// Passedは1回の遊びで突破した敵。敵が攻撃を終えて帰り、弾も消えるまでぶつからなかったら突破。
+type Passed = Pick<Appearance, "kind" | "lap">;
+
+// passedLabelは突破した敵の呼び名。最初の周の敵は周を付けずに呼ぶ。
+function passedLabel({ kind, lap }: Passed): string {
+  return lap === 0 ? enemyNames[kind] : `${lap + 1} 周目の${enemyNames[kind]}`;
+}
+
+function passedSentence(passed: Passed[]): string {
+  if (passed.length === 0) {
+    return "まだ四神は突破していません。";
+  }
+  return `あなたは${passed.map(passedLabel).join("、")}を突破しました。`;
+}
 
 // previewKindは開発中にだけ読む、?game-preview=<敵の名前>の値。遊び始めるとすぐその敵が現れ、
-// 自機は当たっても止まらない。本番のビルドでは読まない。
+// その敵を突破するまでは、自機は当たっても止まらない。本番のビルドでは読まない。
 function previewKind(): EnemyKind | null {
   if (process.env.NODE_ENV !== "development") {
     return null;
   }
   const value = new URLSearchParams(window.location.search).get("game-preview");
-  return value === "turtle" || value === "tiger" || value === "suzaku" || value === "dragon"
+  return value === "genbu" || value === "byakko" || value === "suzaku" || value === "seiryu"
     ? value
     : null;
 }
@@ -36,8 +54,8 @@ const playerBottomGap = 64;
 
 // 落ちてくる速さ（座標/秒）。時間がたつほど速くなり、待機の終わりごろに上限に届く。
 const baseSpeed = 120;
-const speedGainPerSecond = 0.4;
-const maxSpeed = 340;
+const speedGainPerSecond = 0.3;
+const maxSpeed = 300;
 
 // 障害物が出てくる間隔（秒）。時間がたつほど短くなり、待機の終わりごろに下限に届く。
 const baseSpawnInterval = 0.85;
@@ -155,10 +173,9 @@ function hitsCircle(x: number, y: number, circle: Circle): boolean {
 const overlayCopy = {
   idle: {
     title: "よけてあそぶ",
-    body: "画面をなぞると、なぞった向きに動きます。キーボードなら矢印キーか WASD。2 分を過ぎると、四神がひとりずつ現れます。",
+    body: "画面をなぞると、なぞった向きに動きます。キーボードなら矢印キーか WASD。2 分を過ぎると四神がひとりずつ現れ、10 分ごとに次の周でもう一度現れます。",
     action: "あそぶ",
   },
-  crashed: { title: "ぶつかった！", body: "", action: "もう一度" },
   paused: { title: "一時停止中", body: "", action: "つづける" },
 } as const;
 
@@ -169,6 +186,8 @@ export function WaitingGame({ stats }: { stats: RefObject<WaitingGameStats> }) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [lastDistance, setLastDistance] = useState(0);
   const [best, setBest] = useState(0);
+  const [passed, setPassed] = useState<Passed[]>([]);
+  const crashTitleId = useId();
 
   // キャンバスの操作とオーバーレイのボタンが、同じ開始・移動の処理を呼ぶための入り口。
   const controls = useRef<Controls>({
@@ -197,7 +216,11 @@ export function WaitingGame({ stats }: { stats: RefObject<WaitingGameStats> }) {
     let frame = 0;
     let scale = 1;
     let enemy: Enemy | null = null;
-    let appearances: { kind: EnemyKind; at: number }[] = [];
+    let appearances: Appearance[] = [];
+    let enemyLap = 0;
+    let lap = 0;
+    let lapLabelUntil = -1;
+    let passedThisRun: Passed[] = [];
     const preview = previewKind();
     const keys = new Set<string>();
     let pointer: { id: number; x: number; y: number } | null = null;
@@ -231,8 +254,11 @@ export function WaitingGame({ stats }: { stats: RefObject<WaitingGameStats> }) {
       elapsed = 0;
       if (preview !== null) {
         elapsed = appearanceWindow(preview).from;
-        appearances = [{ kind: preview, at: elapsed + 1 }];
+        appearances = [{ kind: preview, lap: 0, at: elapsed + 1 }];
       }
+      lap = Math.floor(elapsed / lapDuration);
+      lapLabelUntil = -1;
+      passedThisRun = [];
       distance = 0;
       spawnIn = 0.6;
       lastFrame = null;
@@ -243,7 +269,7 @@ export function WaitingGame({ stats }: { stats: RefObject<WaitingGameStats> }) {
     }
 
     function crash() {
-      if (preview !== null) {
+      if (preview !== null && passedThisRun.length === 0) {
         return;
       }
       stats.current.crashed = true;
@@ -253,6 +279,7 @@ export function WaitingGame({ stats }: { stats: RefObject<WaitingGameStats> }) {
       keys.clear();
       setLastDistance(distance);
       setBest(stats.current.best);
+      setPassed(passedThisRun);
       enter("crashed");
     }
 
@@ -299,15 +326,23 @@ export function WaitingGame({ stats }: { stats: RefObject<WaitingGameStats> }) {
         clampPlayer();
       }
 
+      const nextLap = Math.floor(elapsed / lapDuration);
+      if (nextLap > lap) {
+        lap = nextLap;
+        lapLabelUntil = elapsed + lapLabelDuration;
+      }
+
       // 敵は1体ずつ。前の敵が帰って、攻撃も消えてから次が現れる。
       if (enemy === null && appearances.length > 0 && appearances[0].at <= elapsed) {
         const next = appearances.shift();
         if (next !== undefined) {
           enemy = new Enemy(next.kind);
+          enemyLap = next.lap;
         }
       }
       enemy?.update(dt, player);
       if (enemy?.finished) {
+        passedThisRun = [...passedThisRun, { kind: enemy.kind, lap: enemyLap }];
         enemy = null;
       }
 
@@ -413,6 +448,16 @@ export function WaitingGame({ stats }: { stats: RefObject<WaitingGameStats> }) {
         context.fillText(`${enemyNames[enemy.kind]}があらわれた！`, worldWidth / 2, 96);
         context.restore();
       }
+
+      if (elapsed < lapLabelUntil) {
+        context.save();
+        context.globalAlpha = Math.min(1, (lapLabelUntil - elapsed) * 2);
+        context.fillStyle = palette.brandEdge;
+        context.font = `700 17px ${palette.font}`;
+        context.textAlign = "center";
+        context.fillText(`${lap + 1} 周目に入りました！`, worldWidth / 2, 132);
+        context.restore();
+      }
     }
 
     // 遊んでいない間は絵が変わらないため、フレームを回すのは遊んでいる間だけにする。
@@ -511,11 +556,7 @@ export function WaitingGame({ stats }: { stats: RefObject<WaitingGameStats> }) {
     };
   }, [stats]);
 
-  const overlay = phase === "running" ? null : overlayCopy[phase];
-  const crashedBody =
-    phase === "crashed"
-      ? `${formatDistance(lastDistance)} 進みました。ベストは ${formatDistance(best)}。`
-      : "";
+  const overlay = phase === "idle" || phase === "paused" ? overlayCopy[phase] : null;
 
   return (
     // スマホでも残り時間とゲームが一度に見えるよう、高さを画面の6割ほどに抑える。
@@ -535,8 +576,8 @@ export function WaitingGame({ stats }: { stats: RefObject<WaitingGameStats> }) {
       {overlay !== null && (
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center bg-white/75 p-6 text-center">
           <p className="text-lg font-bold">{overlay.title}</p>
-          {(overlay.body !== "" || crashedBody !== "") && (
-            <p className="text-muted mt-2 text-sm leading-6">{overlay.body || crashedBody}</p>
+          {overlay.body !== "" && (
+            <p className="text-muted mt-2 text-sm leading-6">{overlay.body}</p>
           )}
           <button
             type="button"
@@ -545,6 +586,49 @@ export function WaitingGame({ stats }: { stats: RefObject<WaitingGameStats> }) {
           >
             {overlay.action}
           </button>
+        </div>
+      )}
+      {phase === "crashed" && (
+        // ぶつかったときは、この回で突破した四神をポップアップで見せる。キャンバスへの操作は
+        // 止め、「もう一度」を押したときだけ次の回を始める。
+        <div className="absolute inset-0 flex items-center justify-center bg-white/60 p-4">
+          <div
+            role="dialog"
+            aria-labelledby={crashTitleId}
+            className="bg-background shadow-brand w-full max-w-xs rounded-3xl p-6 text-center"
+          >
+            <p id={crashTitleId} className="text-lg font-bold">
+              ぶつかった！
+            </p>
+            <p className="text-muted mt-1 text-sm leading-6">
+              {`${formatDistance(lastDistance)} 進みました。ベストは ${formatDistance(best)}。`}
+            </p>
+            <p className="mt-4 text-sm leading-6 font-medium">{passedSentence(passed)}</p>
+            {passed.length > 0 && (
+              <ul className="mt-3 flex flex-wrap justify-center gap-2">
+                {passed.map((item, index) => (
+                  <li
+                    key={index}
+                    className="border-line inline-flex items-center gap-1.5 rounded-full border bg-white px-3 py-1 text-xs font-medium"
+                  >
+                    <span
+                      aria-hidden
+                      className="h-2 w-2 rounded-full"
+                      style={{ backgroundColor: labelColors[item.kind] }}
+                    />
+                    {passedLabel(item)}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <button
+              type="button"
+              onClick={() => controls.current.start()}
+              className="bg-brand text-brand-contrast hover:bg-brand-hover shadow-brand mt-5 inline-flex h-11 items-center justify-center rounded-full px-7 font-bold transition-colors"
+            >
+              もう一度
+            </button>
+          </div>
         </div>
       )}
     </div>

@@ -1599,7 +1599,7 @@ components:
           type: string
           format: date-time
           description: |
-            待機が打ち切られる時刻。`waiting_since` に `MATCHING_WAIT_TTL`（既定 10 分）を
+            待機が打ち切られる時刻。`waiting_since` に `MATCHING_WAIT_TTL`（既定 21 分）を
             足したもので、`state` が `waiting` のときに入る。過ぎると待機は終わり、
             `GET /api/matching` は 404 を返す
           examples:

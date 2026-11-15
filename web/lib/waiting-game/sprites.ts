@@ -14,8 +14,8 @@ const ink = "#3b2f36";
 const cheek = "rgba(255, 150, 170, 0.55)";
 
 const colors = {
-  turtle: { body: "#8fd3b6", light: "#b5e5d0", edge: "#4e9a7c" },
-  tiger: { body: "#ffffff", stripe: "#b5a6d6", edge: "#9d8cc8", pink: "#ffc1cf" },
+  genbu: { body: "#8fd3b6", light: "#b5e5d0", edge: "#4e9a7c" },
+  byakko: { body: "#ffffff", stripe: "#b5a6d6", edge: "#9d8cc8", pink: "#ffc1cf" },
   suzaku: {
     body: "#f89d86",
     belly: "#ffe3d6",
@@ -23,16 +23,16 @@ const colors = {
     crestEdge: "#e0a93a",
     edge: "#e06d5a",
   },
-  dragon: { body: "#9ccaf5", light: "#cfe6fb", edge: "#5d93cc", horn: "#f5cd4a", belly: "#fff3c4" },
+  seiryu: { body: "#9ccaf5", light: "#cfe6fb", edge: "#5d93cc", horn: "#f5cd4a", belly: "#fff3c4" },
   thunder: { bolt: "#f5cd4a", boltEdge: "#e0b030", glow: "rgba(255, 236, 160, 0.55)" },
 };
 
 // labelColorsは「〜があらわれた！」の文字の色。
 export const labelColors = {
-  turtle: colors.turtle.edge,
-  tiger: colors.tiger.edge,
+  genbu: colors.genbu.edge,
+  byakko: colors.byakko.edge,
   suzaku: colors.suzaku.edge,
-  dragon: colors.dragon.edge,
+  seiryu: colors.seiryu.edge,
 };
 
 function circle(context: Context, x: number, y: number, radius: number) {
@@ -98,12 +98,12 @@ function glow(context: Context, x: number, y: number, radius: number, color: str
   context.restore();
 }
 
-function drawTurtle(context: Context, enemy: Enemy) {
+function drawGenbu(context: Context, enemy: Enemy) {
   const { x, y } = enemy;
   const retracted = enemy.cue("retract");
   // 引っこめている間は、甲羅が小さく震える。
   const shake = retracted ? Math.sin(enemy.age * 50) * 1.2 : 0;
-  const { body, light, edge } = colors.turtle;
+  const { body, light, edge } = colors.genbu;
 
   context.save();
   context.translate(x + shake, y);
@@ -139,7 +139,7 @@ function drawTurtle(context: Context, enemy: Enemy) {
 }
 
 function drawShell(context: Context, bullet: Bullet) {
-  const { body, light, edge } = colors.turtle;
+  const { body, light, edge } = colors.genbu;
   circle(context, bullet.x, bullet.y, bullet.radius);
   fillStroke(context, body, edge);
   hexagon(context, bullet.x, bullet.y, bullet.radius * 0.5, bullet.age * 7);
@@ -155,9 +155,9 @@ function drawShell(context: Context, bullet: Bullet) {
   }
 }
 
-function drawTiger(context: Context, enemy: Enemy) {
+function drawByakko(context: Context, enemy: Enemy) {
   const { x, y } = enemy;
-  const { body, stripe, edge, pink } = colors.tiger;
+  const { body, stripe, edge, pink } = colors.byakko;
 
   context.save();
   context.translate(x, y);
@@ -209,7 +209,7 @@ function drawTiger(context: Context, enemy: Enemy) {
 }
 
 function drawClaw(context: Context, strike: Strike, age: number) {
-  const { stripe } = colors.tiger;
+  const { stripe } = colors.byakko;
   const lanes = [0.25, 0.5, 0.75].map((share) => strike.x + strike.width * share);
 
   context.save();
@@ -325,16 +325,16 @@ function cloud(context: Context, x: number, y: number, scale: number) {
     [10, 2, 7],
   ] as const) {
     circle(context, cx, cy, radius);
-    fillStroke(context, "#ffffff", colors.dragon.light, 2);
+    fillStroke(context, "#ffffff", colors.seiryu.light, 2);
   }
   context.fillStyle = "#ffffff";
   context.fillRect(-14, 1, 28, 7);
   context.restore();
 }
 
-function drawDragon(context: Context, enemy: Enemy) {
+function drawSeiryu(context: Context, enemy: Enemy) {
   const { x, y } = enemy;
-  const { body, light, edge, horn, belly } = colors.dragon;
+  const { body, light, edge, horn, belly } = colors.seiryu;
   const glowing = enemy.cue("glow");
 
   context.save();
@@ -437,7 +437,7 @@ function drawThunder(context: Context, strike: Strike, age: number) {
 }
 
 function drawPearl(context: Context, bullet: Bullet) {
-  const { light, body } = colors.dragon;
+  const { light, body } = colors.seiryu;
   context.save();
   context.globalAlpha = pearlFade(bullet);
   const gradient = context.createRadialGradient(
@@ -474,17 +474,17 @@ export function drawStrikes(context: Context, enemy: Enemy) {
 export function drawEnemy(context: Context, enemy: Enemy) {
   if (enemy.present) {
     switch (enemy.kind) {
-      case "turtle":
-        drawTurtle(context, enemy);
+      case "genbu":
+        drawGenbu(context, enemy);
         break;
-      case "tiger":
-        drawTiger(context, enemy);
+      case "byakko":
+        drawByakko(context, enemy);
         break;
       case "suzaku":
         drawSuzaku(context, enemy);
         break;
-      case "dragon":
-        drawDragon(context, enemy);
+      case "seiryu":
+        drawSeiryu(context, enemy);
         break;
     }
   }
