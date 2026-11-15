@@ -25,7 +25,7 @@ const maxConsecutiveFailures = 5;
 const expiryMarginMs = 30_000;
 
 // 待機の打ち切りまでの時間が読めないときに案内する分数。
-const defaultWaitMinutes = 10;
+const defaultWaitMinutes = 21;
 
 const copy = {
   checking: {

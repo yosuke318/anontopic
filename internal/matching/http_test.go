@@ -269,7 +269,7 @@ func TestAWaitTellsTheClientWhenItIsGivenUpOn(t *testing.T) {
 	if got := body.WaitingUntil.Sub(*body.WaitingSince); got != DefaultWaitTTL {
 		t.Fatalf("the wait lasts %s, want %s", got, DefaultWaitTTL)
 	}
-	if DefaultWaitTTL != 10*time.Minute {
-		t.Fatalf("DefaultWaitTTL = %s, want the 10 minutes the waiting screen promises", DefaultWaitTTL)
+	if DefaultWaitTTL != 21*time.Minute {
+		t.Fatalf("DefaultWaitTTL = %s, want the 21 minutes the waiting screen promises", DefaultWaitTTL)
 	}
 }
